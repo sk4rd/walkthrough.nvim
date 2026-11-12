@@ -22,6 +22,14 @@ uncommitted diff, adds numbered notes and fills a panel on the right. The
 
 The plugin defines no global keys; see the README for suggested mappings.
 
+                                                     *walkthrough-setup*
+setup({opts}) is optional:
+
+  panel_side    "left" (default) or "right": side of the code window the
+                panel opens on. "left" suits a Claude terminal on the far
+                left: [ Claude | panel | code ].
+  panel_width   width of the panel, default 70.
+
 ==============================================================================
 2. KEYS                                               *walkthrough-keys*
 
@@ -63,6 +71,7 @@ WalkthroughUnassignedLabel) are derived from the diagnostic colors.
 
 All socket entry points return "ok" or "error: ..." instead of raising.
 
+  setup({opts})        layout options, see |walkthrough-setup|
   load({path})         show a step or tour from a JSON file
   patch({path})        change parts of the tour in place, see
                        |walkthrough-patch|

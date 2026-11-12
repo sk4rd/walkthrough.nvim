@@ -42,7 +42,18 @@ plugins = [
 ];
 ```
 
-Or any plugin manager: the plugin needs no `setup()`.
+Or any plugin manager. `setup()` is optional:
+
+```lua
+require('walkthrough').setup({
+  panel_side = 'left', -- panel left of the code (default) or 'right'
+  panel_width = 70,
+})
+```
+
+The default layout is `[ Claude | panel | code ]`, with the explanation in
+the middle. For that, open the Claude terminal on the left, e.g. in
+claudecode.nvim: `terminal = { split_side = 'left' }`.
 
 ### Claude side
 

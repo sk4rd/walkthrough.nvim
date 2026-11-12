@@ -144,6 +144,33 @@ end
 w.close()
 check('close', vim.json.decode(w.status()).step == 0)
 
+-- Layout ---------------------------------------------------------------------
+-- A new tab with only a scratch window stands in for the Claude terminal.
+local function layout(opts)
+  w.close()
+  w.setup(opts)
+  vim.cmd('tabnew')
+  vim.bo.buftype = 'nofile'
+  local claude = vim.api.nvim_get_current_win()
+  send('load', { file = work .. '/g.txt', panel = '# x' })
+  local cols = {}
+  for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    local b = vim.api.nvim_win_get_buf(win)
+    local name = win == claude and 'claude' or (vim.bo[b].filetype == 'markdown' and 'panel' or 'code')
+    table.insert(cols, { name = name, col = vim.api.nvim_win_get_position(win)[2] })
+  end
+  table.sort(cols, function(a, b) return a.col < b.col end)
+  vim.api.nvim_set_current_win(claude)
+  return table.concat(vim.tbl_map(function(c) return c.name end, cols), ' | ')
+end
+local order = layout({ panel_side = 'left' })
+check('default layout: claude | panel | code', order == 'claude | panel | code', order)
+order = layout({ panel_side = 'right' })
+check('panel_side right: code | panel | claude', order == 'code | panel | claude', order)
+check('setup rejects bad side', not pcall(w.setup, { panel_side = 'up' }))
+w.setup({ panel_side = 'left' })
+w.close()
+
 print(table.concat(results, '\n'))
 print(('%d failed'):format(failed))
 vim.cmd(failed > 0 and ('cquit ' .. failed) or 'qall!')

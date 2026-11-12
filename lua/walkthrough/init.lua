@@ -49,6 +49,20 @@ _G.walkthrough_state = _G.walkthrough_state or {
 }
 local st = _G.walkthrough_state
 
+-- Layout. The default puts the panel left of the code, which suits a Claude
+-- terminal on the far left: [ Claude | panel | code ]. Kept in the state
+-- table so a reload does not reset what setup() chose.
+st.config = st.config or { panel_side = 'left', panel_width = 70 }
+
+--- Optional: setup({ panel_side = 'left' | 'right', panel_width = 70 })
+function M.setup(opts)
+  opts = opts or {}
+  if opts.panel_side and opts.panel_side ~= 'left' and opts.panel_side ~= 'right' then
+    error('walkthrough: panel_side must be "left" or "right"')
+  end
+  st.config = vim.tbl_extend('force', st.config, opts)
+end
+
 -- Highlights ------------------------------------------------------------------
 
 local verdict_hl = {
@@ -103,7 +117,10 @@ end
 -- showing a normal file, else splits off a new one (e.g. when only the Claude
 -- terminal is open).
 local function get_code_win()
-  if st.code_win and vim.api.nvim_win_is_valid(st.code_win) then
+  -- Reuse it only in the current tab; a tour left open in another tab must
+  -- not draw over there.
+  if st.code_win and vim.api.nvim_win_is_valid(st.code_win)
+    and vim.api.nvim_win_get_tabpage(st.code_win) == vim.api.nvim_get_current_tabpage() then
     return st.code_win
   end
   for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
@@ -112,7 +129,10 @@ local function get_code_win()
       return win
     end
   end
-  st.code_win = vim.api.nvim_open_win(0, false, { split = 'left', win = 0 })
+  -- No file window yet (e.g. only the Claude terminal): open one along the
+  -- whole edge opposite the panel, so code ends up on the outside.
+  local side = st.config.panel_side == 'left' and 'right' or 'left'
+  st.code_win = vim.api.nvim_open_win(0, false, { split = side, win = -1 })
   return st.code_win
 end
 
@@ -598,7 +618,11 @@ function M.panel(text, keep_cursor)
     vim.keymap.set('n', 'a', ask_claude, { buffer = st.panel_buf, desc = 'Ask Claude about this note' })
   end
   if not (st.panel_win and vim.api.nvim_win_is_valid(st.panel_win)) then
-    st.panel_win = vim.api.nvim_open_win(st.panel_buf, false, { split = 'right', win = get_code_win(), width = 70 })
+    st.panel_win = vim.api.nvim_open_win(st.panel_buf, false, {
+      split = st.config.panel_side,
+      win = get_code_win(),
+      width = st.config.panel_width,
+    })
     vim.wo[st.panel_win].wrap = true
     vim.wo[st.panel_win].linebreak = true
     vim.wo[st.panel_win].number = false
