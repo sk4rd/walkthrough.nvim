@@ -1,0 +1,113 @@
+*walkthrough.txt*  Annotated code tours of a diff, driven by Claude Code
+
+==============================================================================
+CONTENTS                                                   *walkthrough*
+
+  1. Overview ............................ |walkthrough-overview|
+  2. Keys ................................ |walkthrough-keys|
+  3. Marks ............................... |walkthrough-marks|
+  4. Lua API ............................. |walkthrough-api|
+  5. Step format ......................... |walkthrough-format|
+
+==============================================================================
+1. OVERVIEW                                       *walkthrough-overview*
+
+An outside process (Claude Code) sends tours over Neovim's server socket:
+
+    nvim --server $NVIM --remote-expr "v:lua.require'walkthrough'.load('/tmp/tour.json')"
+
+A tour opens a file in the code window, marks the focus lines, overlays the
+uncommitted diff, adds numbered notes and fills a panel on the right. The
+`claude/skills/walkthrough/tour.sh` script finds the socket and sends tours.
+
+The plugin defines no global keys; see the README for suggested mappings.
+
+==============================================================================
+2. KEYS                                               *walkthrough-keys*
+
+Suggested mappings (see README):
+
+  ]w  [w            next / previous step
+  ]n  [n            next / previous note; the panel scrolls along
+  <leader>an        ask Claude about the note on this line
+  <leader>gw        stage this group's changes in the file
+  <leader>aw        close the tour
+
+In the panel:                                        *walkthrough-panel*
+
+  <CR>              on a `### [n]` heading: jump the code to note n
+  a                 on a heading: ask Claude about note n; elsewhere: about
+                    the step's focus lines
+
+==============================================================================
+3. MARKS                                             *walkthrough-marks*
+
+  blue bar in the sign column     the lines this step is about
+  green line                      change of the reviewed group, unstaged
+  muted line + ✓                  change of the reviewed group, staged
+  red / grey "- old line"         deleted line, unstaged / staged
+  · and "→ group"                 change of another group
+  ? and "not in any group"        change in no group's range
+  "⚠ mixed hunk"                  one unstaged git hunk spans several groups
+  number badge, verdict badge     note number; KEEP SIMPLIFY REMOVE DONE
+
+Highlight groups (link or override them): WalkthroughRange, WalkthroughBar,
+WalkthroughNote, WalkthroughAdded, WalkthroughRemoved, WalkthroughStaged,
+WalkthroughStagedSign, WalkthroughStagedRemoved, WalkthroughOther,
+WalkthroughUnassigned. Badges (WalkthroughBadge, WalkthroughKeep,
+WalkthroughSimplify, WalkthroughRemove, WalkthroughMixed,
+WalkthroughUnassignedLabel) are derived from the diagnostic colors.
+
+==============================================================================
+4. LUA API                                             *walkthrough-api*
+
+All socket entry points return "ok" or "error: ..." instead of raising.
+
+  load({path})         show a step or tour from a JSON file
+  patch({path})        change parts of the tour in place, see
+                       |walkthrough-patch|
+  status()             current step as JSON: {"step":2,"total":5,...}
+  step({delta})        move through the tour (-1, 1)
+  note({delta})        jump to the previous / next note
+  ask_line()           send the note on the cursor line to Claude
+  stage_group()        stage the reviewed group's ranges in the file
+  with_tracked({buf}, {fn})
+                       run {fn} once git knows the file; untracked files
+                       are registered with `git add -N` first
+  clear()              remove all marks
+  close()              end the tour: marks, panel, history, winbar
+
+The tour state survives reloading the module.
+
+==============================================================================
+5. STEP FORMAT                                       *walkthrough-format*
+
+A tour: >json
+    { "group": "Feature name", "start": 1,
+      "steps": [{
+        "file": "/absolute/path.nix",
+        "title": "what this step is about",
+        "from": 10, "to": 20,
+        "hunks": [{ "from": 10, "to": 20, "group": "Feature name" },
+                  { "from": 41, "to": 41, "group": "Other feature" }],
+        "notes": [{ "line": 12, "text": "few words", "verdict": "simplify",
+                    "detail": "the explanation, shown in the panel" }],
+        "panel": "markdown"
+      }] }
+<
+Only `file` is required. Lines are 1-based and inclusive. `hunks` turns on
+the diff overlay (vs HEAD, staged parts muted); `"diff": "<ref>"` gives a
+plain diff against a ref instead. A lone step (no "steps") is appended to
+the current tour.
+
+                                                     *walkthrough-patch*
+A patch is one object or a list: >json
+    [{ "step": 1, "note": 3, "verdict": "done", "text": "renamed" },
+     { "step": 2, "from": 12, "to": 15, "panel": "..." },
+     { "note": 4, "line": 30, "text": "a new note" },
+     { "note": 1, "remove": true }]
+<
+`step` defaults to the current one. The current step is redrawn without
+moving the cursor unless its file or focus changed.
+
+ vim:tw=78:ts=8:ft=help:norl:

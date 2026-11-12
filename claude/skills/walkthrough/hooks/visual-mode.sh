@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# UserPromptSubmit hook: enforce the walkthrough's visual mode.
+#
+# On every prompt of a session that runs /walkthrough, check whether a Neovim
+# with the walkthrough module is reachable (tour.sh --status) and tell Claude
+# the result as a rule, so it never decides from guesses. Other sessions get
+# nothing.
+set -u
+
+input=$(cat)
+prompt=$(jq -r '.prompt // ""' <<<"$input")
+transcript=$(jq -r '.transcript_path // ""' <<<"$input")
+
+# In a walkthrough if this prompt starts one, or the session ran /walkthrough
+# before (a user message that is the skill invocation itself; mentions of the
+# word in tool output do not count).
+active=0
+if [[ $prompt =~ ^[[:space:]]*/walkthrough ]]; then
+  active=1
+elif [[ -f $transcript ]] && jq -e -n '
+    first(inputs | select(.type == "user"
+      and (.message.content | type) == "string"
+      and (.message.content | startswith("<command-message>walkthrough</command-message>")))) | true
+  ' "$transcript" >/dev/null 2>&1; then
+  active=1
+fi
+((active)) || exit 0
+
+tour="$(dirname "$(readlink -f "$0")")/../tour.sh"
+if status=$("$tour" --status 2>&1); then
+  msg="Walkthrough visual mode is ON (checked by hook: tour.sh --status -> $status). A Neovim with the walkthrough module is reachable. Show every group as a tour with tour.sh (one call per group) and update it with tour.sh --patch after edits. Do not present a group only in chat."
+else
+  msg="Walkthrough visual mode is OFF (checked by hook: tour.sh --status -> $status). Use chat mode, or ask the user to open Neovim or pick a socket."
+fi
+jq -n --arg m "$msg" '{hookSpecificOutput: {hookEventName: "UserPromptSubmit", additionalContext: $m}}'
