@@ -171,6 +171,38 @@ check('setup rejects bad side', not pcall(w.setup, { panel_side = 'up' }))
 w.setup({ panel_side = 'left' })
 w.close()
 
+-- Minimum code width ---------------------------------------------------------
+vim.o.columns = 200
+vim.cmd('tabnew')
+vim.bo.buftype = 'nofile'
+local claude = vim.api.nvim_get_current_win()
+send('load', { file = work .. '/g.txt', panel = '# x' })
+vim.api.nvim_win_set_width(claude, 60)
+w.keep_code_wide()
+local function widths()
+  local out = {}
+  for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    local b = vim.api.nvim_win_get_buf(win)
+    local name = win == claude and 'claude' or (vim.bo[b].filetype == 'markdown' and 'panel' or 'code')
+    out[name] = vim.api.nvim_win_get_width(win)
+  end
+  return out
+end
+local wd = widths()
+check('code at least half the screen', wd.code >= 100, vim.inspect(wd))
+check('panel keeps its minimum', wd.panel >= 30, vim.inspect(wd))
+-- Widen Claude's window: the resize event must win the space back for the code.
+vim.api.nvim_win_set_width(claude, 150)
+-- A headless script run never fires WinResized (a running Neovim does), so
+-- fire it here; this still goes through the plugin's own handler.
+vim.api.nvim_exec_autocmds('WinResized', {})
+vim.wait(300, function() return widths().code >= 100 end)
+wd = widths()
+check('code stays half after a resize', wd.code >= 100, vim.inspect(wd))
+check('panel minimum after a resize', wd.panel >= 30, vim.inspect(wd))
+check('setup rejects bad ratio', not pcall(w.setup, { code_min_ratio = 1.5 }))
+w.close()
+
 print(table.concat(results, '\n'))
 print(('%d failed'):format(failed))
 vim.cmd(failed > 0 and ('cquit ' .. failed) or 'qall!')

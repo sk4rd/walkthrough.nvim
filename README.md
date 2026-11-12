@@ -48,6 +48,8 @@ Or any plugin manager. `setup()` is optional:
 require('walkthrough').setup({
   panel_side = 'left', -- panel left of the code (default) or 'right'
   panel_width = 70,
+  panel_min_width = 30, -- the panel never shrinks below this
+  code_min_ratio = 0.5, -- the code window keeps at least half the screen
 })
 ```
 

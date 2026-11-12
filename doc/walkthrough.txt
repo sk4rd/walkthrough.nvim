@@ -29,6 +29,14 @@ setup({opts}) is optional:
                 panel opens on. "left" suits a Claude terminal on the far
                 left: [ Claude | panel | code ].
   panel_width   width of the panel, default 70.
+  code_min_ratio
+                share of the screen the code window always keeps, default
+                0.5. Re-applied after every tour update, when windows open
+                or are resized (e.g. the Claude terminal), and when the
+                screen size changes. The space comes from the panel first.
+  panel_min_width
+                the panel never shrinks below this, default 30; beyond it
+                the other windows give up the space.
 
 ==============================================================================
 2. KEYS                                               *walkthrough-keys*

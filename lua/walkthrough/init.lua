@@ -52,13 +52,23 @@ local st = _G.walkthrough_state
 -- Layout. The default puts the panel left of the code, which suits a Claude
 -- terminal on the far left: [ Claude | panel | code ]. Kept in the state
 -- table so a reload does not reset what setup() chose.
-st.config = st.config or { panel_side = 'left', panel_width = 70 }
+-- 'keep' adds options a newer version introduced to a state table that an
+-- older copy of the module created.
+st.config = vim.tbl_extend('keep', st.config or {}, {
+  panel_side = 'left',
+  panel_width = 70,
+  panel_min_width = 30, -- the panel never shrinks below this to make room
+  code_min_ratio = 0.5, -- the code window keeps at least this share of the screen
+})
 
---- Optional: setup({ panel_side = 'left' | 'right', panel_width = 70 })
+--- Optional: setup({ panel_side, panel_width, panel_min_width, code_min_ratio })
 function M.setup(opts)
   opts = opts or {}
   if opts.panel_side and opts.panel_side ~= 'left' and opts.panel_side ~= 'right' then
     error('walkthrough: panel_side must be "left" or "right"')
+  end
+  if opts.code_min_ratio and (opts.code_min_ratio <= 0 or opts.code_min_ratio >= 1) then
+    error('walkthrough: code_min_ratio must be between 0 and 1')
   end
   st.config = vim.tbl_extend('force', st.config, opts)
 end
@@ -608,6 +618,38 @@ function M.ask_line()
   send_to_claude(step, n, line, line, request)
 end
 
+-- Keep the code window at least `code_min_ratio` of the screen wide. Space
+-- comes from the panel first, down to `panel_min_width`, then from the other
+-- windows (the Claude terminal): the code window is fixed while the panel
+-- takes its minimum back, so that width can only come from the far side.
+local enforcing = false
+local function keep_code_wide()
+  local code = st.code_win
+  if enforcing or not (code and vim.api.nvim_win_is_valid(code)) then
+    return
+  end
+  if vim.api.nvim_win_get_tabpage(code) ~= vim.api.nvim_get_current_tabpage() then
+    return
+  end
+  local target = math.ceil(vim.o.columns * st.config.code_min_ratio)
+  if vim.api.nvim_win_get_width(code) >= target then
+    return
+  end
+  enforcing = true
+  pcall(function()
+    vim.api.nvim_win_set_width(code, target)
+    local panel = st.panel_win
+    if panel and vim.api.nvim_win_is_valid(panel) and vim.api.nvim_win_get_width(panel) < st.config.panel_min_width then
+      local fixed = vim.wo[code].winfixwidth
+      vim.wo[code].winfixwidth = true
+      vim.api.nvim_win_set_width(panel, st.config.panel_min_width)
+      vim.wo[code].winfixwidth = fixed
+    end
+  end)
+  enforcing = false
+end
+M.keep_code_wide = keep_code_wide
+
 -- Show `text` (markdown) in a scratch split to the right of the code.
 function M.panel(text, keep_cursor)
   if not (st.panel_buf and vim.api.nvim_buf_is_valid(st.panel_buf)) then
@@ -636,6 +678,7 @@ function M.panel(text, keep_cursor)
   vim.api.nvim_buf_set_lines(st.panel_buf, 0, -1, false, to_lines(text))
   vim.bo[st.panel_buf].modifiable = false
   vim.api.nvim_win_set_cursor(st.panel_win, { math.min(cursor, vim.api.nvim_buf_line_count(st.panel_buf)), 0 })
+  keep_code_wide()
 end
 
 -- Clear everything and close the panel; forget the history.
@@ -714,6 +757,7 @@ local function render(step)
   if #text > 0 then
     M.panel(text)
   end
+  keep_code_wide()
 end
 
 -- Move through the tour: -1 back, 1 forward.
@@ -1043,6 +1087,16 @@ local function schedule_refresh(buf)
 end
 
 local group = vim.api.nvim_create_augroup('walkthrough', { clear = true })
+-- Windows opening (the Claude terminal), being resized, or the screen size
+-- changing can squeeze the code window; scheduled so the layout has settled.
+vim.api.nvim_create_autocmd({ 'WinResized', 'VimResized', 'WinNew' }, {
+  group = group,
+  callback = function()
+    if current() then
+      vim.schedule(keep_code_wide)
+    end
+  end,
+})
 -- Badges copy colors from the theme, so recompute them when the theme changes.
 vim.api.nvim_create_autocmd('ColorScheme', { group = group, callback = define_highlights })
 -- Written by the user, accepted from a Claude diff, or reloaded after an
