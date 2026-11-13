@@ -103,7 +103,7 @@ local function vtexts(buf)
   for _, id in ipairs({ H.ns, ns_threads }) do
     for _, m in ipairs(vim.api.nvim_buf_get_extmarks(buf, id, 0, -1, { details = true })) do
       for _, vl in ipairs(m[4].virt_lines or {}) do
-        table.insert(out, { text = vl[1][1], ns = id, row = m[2] })
+        table.insert(out, { text = H.vtext(vl), ns = id, row = m[2] })
       end
     end
   end

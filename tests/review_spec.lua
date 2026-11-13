@@ -226,7 +226,7 @@ check('replace: the state file holds the agent\'s tour only', #saved(root).tours
   and saved(root).tours[1].auto == nil)
 w.step(1)
 check('replace: the thread is drawn', H.marks(function(d)
-  return d.virt_lines ~= nil and d.virt_lines[1][1][1]:match('t1 %(waiting%) you: why A3%?') ~= nil
+  return d.virt_lines ~= nil and H.vtext(d.virt_lines[1]):match('t1 %(waiting%) you: why A3%?') ~= nil
 end, vim.fn.bufnr(dir .. '/a.txt')) == 1)
 
 -- A tour with a group does not touch the review of another repository, and a failing load keeps the review.

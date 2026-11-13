@@ -86,7 +86,7 @@ local function virt_at(row)
   local out = {}
   for _, m in ipairs(vim.api.nvim_buf_get_extmarks(abuf(), H.ns, { row - 1, 0 }, { row - 1, -1 }, { details = true })) do
     for _, vl in ipairs(m[4].virt_lines or {}) do
-      table.insert(out, vl[1][1])
+      table.insert(out, H.vtext(vl))
     end
   end
   return out
@@ -400,4 +400,38 @@ ui.refresh_float()
 check('float: closed when the tour is gone', thread.win() == nil)
 
 w.close()
+-- The state of a thread has its own colour; the label of another commit is grey.
+do
+  local function hl(name)
+    return vim.api.nvim_get_hl(0, { name = name })
+  end
+  check('colours: the state links to DiagnosticInfo', hl('WalkthroughState').link == 'DiagnosticInfo', vim.inspect(hl('WalkthroughState')))
+  -- A block: the grey of Comment as the background, like the other badges.
+  local comment = vim.api.nvim_get_hl(0, { name = 'Comment', link = false })
+  check('colours: the label of another commit is a grey block', hl('WalkthroughOtherLabel').bg == comment.fg
+    and hl('WalkthroughOtherLabel').bg ~= nil, vim.inspect(hl('WalkthroughOtherLabel')))
+  w.close()
+  local f = H.work .. '/f.txt'
+  check('colours: load', send('load', { steps = { { file = f, title = 't' } } }) == 'ok')
+  vim.api.nvim_set_current_win(st.code_win)
+  vim.cmd('edit ' .. vim.fn.fnameescape(f))
+  vim.api.nvim_win_set_cursor(0, { 2, 0 })
+  w.change('make it shorter')
+  local found
+  for _, name in ipairs({ 'walkthrough', 'walkthrough_threads' }) do
+    local id = vim.api.nvim_get_namespaces()[name]
+    for _, m in ipairs(id and vim.api.nvim_buf_get_extmarks(0, id, 0, -1, { details = true }) or {}) do
+      for _, vl in ipairs(m[4].virt_lines or {}) do
+        for _, chunk in ipairs(vl) do
+          if chunk[1] == '(not sent)' then
+            found = chunk[2]
+          end
+        end
+      end
+    end
+  end
+  check('colours: the state is a chunk of its own, in WalkthroughState', found == 'WalkthroughState', tostring(found))
+  w.close()
+end
+
 H.finish()

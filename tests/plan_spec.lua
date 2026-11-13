@@ -80,7 +80,7 @@ local function marks_text(buf)
   local out = {}
   for _, m in ipairs(vim.api.nvim_buf_get_extmarks(buf, ns_threads, 0, -1, { details = true })) do
     for _, vl in ipairs(m[4].virt_lines or {}) do
-      table.insert(out, vl[1][1])
+      table.insert(out, H.vtext(vl))
     end
   end
   return table.concat(out, '\n')

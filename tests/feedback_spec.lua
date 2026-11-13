@@ -86,7 +86,7 @@ local function th(id)
 end
 local function virt(pattern)
   return H.marks(function(d)
-    return d.virt_lines ~= nil and d.virt_lines[1] ~= nil and d.virt_lines[1][1][1]:match(pattern) ~= nil
+    return d.virt_lines ~= nil and d.virt_lines[1] ~= nil and H.vtext(d.virt_lines[1]):match(pattern) ~= nil
   end, vim.fn.bufnr(a))
 end
 local function dimmed()

@@ -77,8 +77,8 @@ do
   local lines, fits = {}, true
   for _, m in ipairs(vim.api.nvim_buf_get_extmarks(0, H.ns, 0, -1, { details = true })) do
     for _, vl in ipairs(m[4].virt_lines or {}) do
-      table.insert(lines, vl[1][1])
-      fits = fits and vim.fn.strdisplaywidth(vl[1][1]) <= width
+      table.insert(lines, H.vtext(vl))
+      fits = fits and vim.fn.strdisplaywidth(H.vtext(vl)) <= width
     end
   end
   check('long answer: every virtual line fits the code window', fits and #lines > 2, vim.inspect(lines))
@@ -96,7 +96,7 @@ do
     local out = {}
     for _, m in ipairs(vim.api.nvim_buf_get_extmarks(0, H.ns, { row - 1, 0 }, { row - 1, -1 }, { details = true })) do
       for _, vl in ipairs(m[4].virt_lines or {}) do
-        table.insert(out, vl[1][1])
+        table.insert(out, H.vtext(vl))
       end
     end
     return out

@@ -44,6 +44,13 @@ function M.define_highlights()
   vim.api.nvim_set_hl(0, 'WalkthroughOther', { link = 'Comment', default = true })
   vim.api.nvim_set_hl(0, 'WalkthroughUnassigned', { link = 'DiagnosticWarn', default = true })
   badge('WalkthroughUnassignedLabel', 'DiagnosticWarn')
+  -- The name of the commit a dimmed line belongs to: a grey block. It is
+  -- readable as a label, without a colour that pulls the eye away from the
+  -- commit under review.
+  badge('WalkthroughOtherLabel', 'Comment')
+  -- Where a thread stands (waiting, not sent, proposal, ...), under the code
+  -- and in the map's count line: the one thing that asks for attention.
+  vim.api.nvim_set_hl(0, 'WalkthroughState', { link = 'DiagnosticInfo', default = true })
   badge('WalkthroughMixed', 'DiagnosticWarn')
   badge('WalkthroughBadge', 'DiagnosticInfo')
   badge('WalkthroughKeep', 'DiagnosticOk')
@@ -154,7 +161,7 @@ M.classify = classify
 
 local label = {
   other = function(group)
-    return { ' → ' .. group .. ' ', 'WalkthroughOther' }
+    return { ' → ' .. group .. ' ', 'WalkthroughOtherLabel' }
   end,
   unassigned = function()
     return { ' ? not in any commit ', 'WalkthroughUnassignedLabel' }
@@ -450,7 +457,8 @@ local function draw_thread(buf, th, ns_id, at)
   local dim = th.state == 'done' or th.state == 'declined'
   local hl = dim and 'WalkthroughThreadDim' or 'WalkthroughThread'
   local label = state_label[th.state]
-  local head = ('» %s%s you: '):format(th.id, label and (' (' .. label .. ')') or '')
+  local state = label and ('(' .. label .. ')') or nil
+  local head = ('» %s%s you: '):format(th.id, state and (' ' .. state) or '')
   local width = text_width(buf) - indent - 1
   local suffix = th.stale and ' (code changed)' or ''
   local lines = {}
@@ -471,8 +479,14 @@ local function draw_thread(buf, th, ns_id, at)
     table.insert(lines, '    … full thread: ' .. thread_key())
   end
   local virt = {}
-  for _, l in ipairs(lines) do
-    table.insert(virt, { { pad .. l, hl } })
+  for i, l in ipairs(lines) do
+    local open = ('» %s '):format(th.id)
+    if i == 1 and user and state and not dim and l:sub(1, #open + #state) == open .. state then
+      -- The state is a chunk of its own, so it can have its own colour.
+      table.insert(virt, { { pad .. open, hl }, { state, 'WalkthroughState' }, { l:sub(#open + #state + 1), hl } })
+    else
+      table.insert(virt, { { pad .. l, hl } })
+    end
   end
   vim.api.nvim_buf_set_extmark(buf, ns_id or ns, row - 1, 0, { virt_lines = virt })
 end
@@ -998,7 +1012,7 @@ function M.layout_map(pos, width)
   end
   if #parts > 0 then
     local n = add(table.concat(parts, ' · '))
-    table.insert(marks, { n - 1, 0, #lines[n], 'WalkthroughMapCount' })
+    table.insert(marks, { n - 1, 0, #lines[n], 'WalkthroughState' })
   end
   return lines, marks, rows, current
 end

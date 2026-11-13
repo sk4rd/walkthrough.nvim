@@ -159,4 +159,13 @@ function H.wait(fn)
   return vim.wait(5000, fn, 20)
 end
 
+--- The text of one virtual line: all its chunks, as it reads on screen.
+function H.vtext(vl)
+  local out = {}
+  for _, chunk in ipairs(vl or {}) do
+    table.insert(out, chunk[1])
+  end
+  return table.concat(out)
+end
+
 return H

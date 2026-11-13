@@ -496,13 +496,13 @@ diff drawn over it (|walkthrough-marks|).
 The compact view shows one read-only buffer with only the changed parts of the
 commit's files, in map order: a heading per entry (the path, a `·`, the
 sentence, `(new file)` for a file that is not in the base), then its git hunks
-with 3 lines of context, separated by `⋯`. A line is its number (the old one
-for a removed line), a sign (` `, `+`, `-`) and the text:
+with 3 lines of context, separated by `⋯`. A line is its number in the file
+as it is now (a removed line has none), a sign (` `, `+`, `-`) and the text:
 
 >
     backup.sh  ·  the destination can be set from outside
        8   fi
-      10 - dest=/tmp/backups
+         - dest=/tmp/backups
       10 + dest=${BACKUP_DIR:-/tmp/backups}
       11
 <
@@ -1359,7 +1359,8 @@ WalkthroughRemoved (DiffDelete), WalkthroughStaged (CursorLine),
 WalkthroughStagedSign (DiagnosticOk), WalkthroughStagedRemoved,
 WalkthroughOther, WalkthroughEvidence, WalkthroughNoteDetail and
 WalkthroughThreadDim (Comment), WalkthroughUnassigned (DiagnosticWarn),
-WalkthroughThread (DiagnosticHint). The map: WalkthroughMapHeading (Normal),
+WalkthroughThread (DiagnosticHint), WalkthroughState (DiagnosticInfo: where a
+thread stands, under the code and in the map's count line). The map: WalkthroughMapHeading (Normal),
 WalkthroughMapActive (Title), WalkthroughMapMarker (DiagnosticInfo),
 WalkthroughMapTitle, WalkthroughMapSeen and WalkthroughMapCount (Comment).
 The compact view: WalkthroughHeading (Title), WalkthroughGutter (LineNr) and
@@ -1370,6 +1371,8 @@ background, and the Normal background becomes its text. They are computed
 again when the colorscheme changes. WalkthroughBadge (DiagnosticInfo),
 WalkthroughKeep and WalkthroughAccepted (DiagnosticOk), WalkthroughSimplify,
 WalkthroughMixed and WalkthroughUnassignedLabel (DiagnosticWarn),
+WalkthroughOtherLabel (Comment: a grey block with the name of the commit a
+dimmed line belongs to),
 WalkthroughRemove and WalkthroughRejected (DiagnosticError), WalkthroughMoved
 (Comment).
 

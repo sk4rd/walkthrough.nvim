@@ -8,7 +8,7 @@
 --     10 + dest=${BACKUP_DIR:-/tmp/backups}
 --     11
 --
--- A line is the line number (the old one for a removed line), a sign (` `,
+-- A line is the line number (none for a removed line), a sign (` `,
 -- `+`, `-`) and the text. Every buffer line maps to (entry, new line, old
 -- line) in `view.rows`, which is how the cursor is translated to the file
 -- (threads, staging, ...). The buffer is built from `git diff`: one call per
@@ -390,8 +390,10 @@ function M.layout(t, data, key)
           if i > limit then
             break
           end
-          local num = line.kind == '-' and line.old or line.new
-          local text = ('%' .. width .. 'd %s %s'):format(num, line.kind, line.text)
+          -- Only lines of the file as it is now are numbered. A removed line
+          -- is not in the file: a number there would read as a line to go to.
+          local num = line.kind == '-' and '' or tostring(line.new)
+          local text = ('%' .. width .. 's %s %s'):format(num, line.kind, line.text)
           if line.text == '' then
             text = text:gsub('%s+$', '')
           end
@@ -437,7 +439,7 @@ function M.layout(t, data, key)
                   other = ' → ' .. tostring(group) .. ' ', unassigned = ' ? not in any commit ',
                   stale = ' ? stale range ',
                 }
-                mark.virt_text = { { label[class], class == 'other' and 'WalkthroughOther' or 'WalkthroughUnassignedLabel' } }
+                mark.virt_text = { { label[class], class == 'other' and 'WalkthroughOtherLabel' or 'WalkthroughUnassignedLabel' } }
                 mark.virt_text_pos = 'eol'
               end
             end

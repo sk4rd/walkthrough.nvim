@@ -179,7 +179,7 @@ hunks with 3 lines of context and `⋯` between them:
 ```
 backup.sh  ·  the destination can be set from outside
    8   fi
-  10 - dest=/tmp/backups
+     - dest=/tmp/backups
   10 + dest=${BACKUP_DIR:-/tmp/backups}
   11
 ```

@@ -103,7 +103,7 @@ local function vtexts(buf)
   for _, id in ipairs({ H.ns, ns_threads }) do
     for _, m in ipairs(vim.api.nvim_buf_get_extmarks(buf, id, 0, -1, { details = true })) do
       for _, vl in ipairs(m[4].virt_lines or {}) do
-        table.insert(out, { text = vl[1][1], row = m[2] + 1 })
+        table.insert(out, { text = H.vtext(vl), row = m[2] + 1 })
       end
     end
   end
@@ -174,19 +174,19 @@ check('the buffer is a read-only scratch buffer', vim.bo[buf_a].buftype == 'nofi
 local expected = table.concat({
   'f.txt  ·  one',
   '   1   a1',
-  '   2 - a2',
-  '   3 - a3',
-  '   4 - a4',
+  '     - a2',
+  '     - a3',
+  '     - a4',
   '   2 + A2',
   '   3 + A3',
   '   4 + B4',
   '   5   a5',
   '   6   a6',
   '   7   a7',
-  '   8 - a8',
+  '     - a8',
   '   8 + X8',
   '   9   a9',
-  '  10 - a10',
+  '     - a10',
   '',
   'g.txt  ·  two   (no diff)',
   '',
@@ -233,7 +233,7 @@ local both = table.concat({
   'm.txt  ·  both',
   '   1   l1',
   '   2   l2',
-  '   3 - l3',
+  '     - l3',
   '   3 + X3',
   '   4   l4',
   '   5   l5',
@@ -242,7 +242,7 @@ local both = table.concat({
   '  27   l27',
   '  28   l28',
   '  29   l29',
-  '  30 - l30',
+  '     - l30',
   '  30 + Y30',
   '  31   l31',
   '  32   l32',
