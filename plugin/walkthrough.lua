@@ -64,6 +64,8 @@ local subcommands = {
     wt().change(arg ~= '' and arg or nil, o and o.range > 0 and { o.line1, o.line2 } or nil)
   end,
   thread = function() wt().thread() end,
+  -- link: open a link of the thread or finding under the cursor.
+  link = function() wt().link() end,
   -- map: show the map panel, or hide it.
   map = function() wt().map() end,
   -- inline: hide the text of threads and findings under the lines, or show it.
@@ -188,6 +190,7 @@ local plugs = {
   ask = plug(function() wt().ask() end, { 'n', 'x' }),
   change = plug(function() wt().change() end, { 'n', 'x' }),
   thread = plug(function() wt().thread() end),
+  link = plug(function() wt().link() end),
   map = plug(function() wt().map() end),
   inline = plug(function() wt().inline() end),
   ['thread-delete'] = plug(function() wt().thread_delete() end),

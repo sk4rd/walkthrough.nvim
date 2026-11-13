@@ -273,6 +273,13 @@ Write
                               decisions on proposals and findings.
   `:Walkthrough thread`       open the thread or finding on this line in full,
                               in a float (|walkthrough-thread|).
+  `:Walkthrough link`         open a link of the thread or finding on this
+                              line with |vim.ui.open()|. The text under a line
+                              is virtual, so the cursor cannot go to a URL
+                              there. One link is opened at once; of several
+                              you pick one (|vim.ui.select()|), the links of
+                              the newest message first. A Markdown link
+                              (`[text](url)`) is listed with its text.
   `:Walkthrough thread-delete`
                               delete the thread on this line.
   `:Walkthrough explain {x}`  `x` is "simpler" or "deeper": ask the agent to
@@ -359,6 +366,7 @@ visual mode, where they cover the selected lines):
   <Plug>(walkthrough-change)             write a change request here
   <Plug>(walkthrough-send)               send change requests and decisions
   <Plug>(walkthrough-thread)             open the thread or finding in full
+  <Plug>(walkthrough-link)               open a link of the thread or finding
   <Plug>(walkthrough-thread-delete)      delete the thread under the cursor
   <Plug>(walkthrough-simpler)            ask for a simpler answer
   <Plug>(walkthrough-deeper)             ask for a deeper answer
@@ -408,6 +416,7 @@ Write
   Pc          write a change request (normal and visual mode)
   Pm          send
   Pt          open the thread here in full
+  Po          open a link of the thread or finding here
   PX          delete the thread here
   P-          simpler
   P+  P=      deeper
@@ -463,6 +472,8 @@ when its thread changes while it is open. Its keys:
             another one; in a declined or done thread it continues the thread.
   y  d      accept / decline the proposal or finding (marked, not sent)
   u         take the decision back (while it is not sent)
+  o         open a link of the thread or finding (`:Walkthrough link`). URLs
+            are underlined, and |gx| on one opens it too.
   -  + =    simpler / deeper
   X         delete the thread, after asking (the default answer cancels).
             Findings cannot be deleted.
@@ -1396,6 +1407,7 @@ notification (|vim.notify()|).
   change({text}, {range})
                       write a change request, collected until send()
   thread()            the thread or finding here in full, in a float
+  link()              open a link of the thread or finding here
   thread_delete()     delete the thread here
   send()              send what was not delivered yet (all commits of the
                       repository)

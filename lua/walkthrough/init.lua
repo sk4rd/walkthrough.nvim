@@ -17,6 +17,7 @@
 --   send.lua   handing a message to the agent (senders)
 --   feedback.lua  threads, decisions, send/inbox, explain
 --   thread.lua    a thread or note in full, in a float
+--   links.lua     the links in a thread or note, and opening one
 --   input.lua     where text is typed: a centered float (or vim.ui.input)
 --   drawer.lua    threads in every buffer the code window's draw does not cover
 --   reject.lua    discarding a group's unstaged changes
@@ -804,6 +805,10 @@ M.ask = ui.safe(feedback.ask)
 M.ask_line = M.ask
 M.change = ui.safe(feedback.change)
 M.thread = ui.safe(thread.show)
+--- Open a link of the thread or finding under the cursor (links.lua).
+M.link = ui.safe(function()
+  require('walkthrough.links').open(feedback.here())
+end)
 M.thread_delete = ui.safe(feedback.thread_delete)
 M.decide = ui.safe(feedback.decide)
 M.send = ui.safe(feedback.send)

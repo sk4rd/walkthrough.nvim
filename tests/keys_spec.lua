@@ -192,14 +192,14 @@ local function all_mapped(prefix)
 end
 local bad = all_mapped('<leader>w')
 check('keys = true: every default key is mapped to its action, with a desc', #bad == 0, table.concat(bad, ', '))
-check('keys = true: the table has the keys of the spec', #keys.defaults == 33)
+check('keys = true: the table has the keys of the spec', #keys.defaults == 34)
 -- The final key set, group by group, exactly as the product defines it ("P" is the prefix).
 do
   local spec = {
     Pr = 'review', PM = 'request', PR = 'resume', Pq = 'close',
     [']w'] = 'next', ['[w'] = 'prev', [']n'] = 'note-next', ['[n'] = 'note-prev', ['P]'] = 'group-next',
     ['P['] = 'group-prev', Pv = 'view', Pp = 'map', Ph = 'inline', Pw = 'back',
-    Pa = 'ask', Pc = 'change', Pm = 'send', Pt = 'thread', PX = 'thread-delete', ['P-'] = 'simpler',
+    Pa = 'ask', Pc = 'change', Pm = 'send', Pt = 'thread', Po = 'link', PX = 'thread-delete', ['P-'] = 'simpler',
     ['P+'] = 'deeper', ['P='] = 'deeper',
     Py = 'accept', Pd = 'decline', P0 = 'undecide',
     Ps = 'stage', PS = 'stage-all', Px = 'reject', Pb = 'base', PC = 'commit',
@@ -240,7 +240,7 @@ text, float = sheet()
 check('cheat sheet: shows the mapped keys', text:match(']w%s+next entry') and text:match('<leader>wa%s+ask')
   and text:match('<leader>wS%s+stage the commit\'s lines in every file'), text)
 check('cheat sheet: both keys of one action', text:match('<leader>w%+ <leader>w=') ~= nil, text)
-check('cheat sheet: the Write group', text:match('Write\n%s+<leader>wa%s+ask a question here %(sent at once%)\n%s+<leader>wc%s+write a change request here %(collected%)\n%s+<leader>wm%s+send the change requests and decisions\n%s+<leader>wt%s+open the thread or finding here in full\n%s+<leader>wX%s+delete the thread here') ~= nil, text)
+check('cheat sheet: the Write group', text:match('Write\n%s+<leader>wa%s+ask a question here %(sent at once%)\n%s+<leader>wc%s+write a change request here %(collected%)\n%s+<leader>wm%s+send the change requests and decisions\n%s+<leader>wt%s+open the thread or finding here in full\n%s+<leader>wo%s+open a link of the thread or finding here\n%s+<leader>wX%s+delete the thread here') ~= nil, text)
 check('cheat sheet: no command for a mapped action', not text:match(':Walkthrough next'), text)
 check('cheat sheet: Start has review, request, resume and close, in that order', text:match('Start\n%s+<leader>wr%s+review the uncommitted changes[^\n]*\n%s+<leader>wM%s+ask the agent for the map of the change\n%s+<leader>wR%s+bring back the saved review\n%s+<leader>wq%s+end the session\n\nMove') ~= nil, text)
 check('cheat sheet: the snapshot action is not on it', not text:match('snapshot') and not text:match('reviewed'), text)

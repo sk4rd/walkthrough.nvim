@@ -9,6 +9,7 @@ local tour = require('walkthrough.tour')
 local ui = require('walkthrough.ui')
 local feedback = require('walkthrough.feedback')
 local input = require('walkthrough.input')
+local links = require('walkthrough.links')
 
 local M = {}
 
@@ -186,6 +187,10 @@ local function map_keys(buf)
   map({ 'u' }, 'take the decision back', act(function(target)
     feedback.decide_on(target, nil)
   end))
+  -- `gx` on a URL works as in every buffer; `o` needs no cursor on it.
+  map({ 'o' }, 'open a link', act(function(target)
+    links.open(target)
+  end))
   map({ '-' }, 'explain simpler', act(function(target)
     feedback.explain_on(target, 'simpler')
   end))
@@ -227,9 +232,15 @@ function M.show()
     border = 'rounded',
     title = target.thread and (' Thread %s '):format(target.thread.id) or (' Finding [%d] '):format(target.note.n),
     title_pos = 'center',
+    footer = ' r reply · y d decide · o open a link · q close ',
+    footer_pos = 'center',
   })
   vim.wo[win].wrap = true
   vim.wo[win].linebreak = true
+  -- Links stand out, so they are found when reading.
+  vim.api.nvim_win_call(win, function()
+    vim.fn.matchadd('Underlined', [[https\?://[^ \t<>"`]\+]])
+  end)
   float = {
     win = win, buf = buf, t = target.t, si = target.si,
     thread = target.thread and target.thread.id or nil, note = (not target.thread) and target.note.n or nil,

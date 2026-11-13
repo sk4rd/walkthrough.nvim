@@ -170,7 +170,7 @@ the prefix.
 |---|---|
 | Start | `Pr` review, `PM` request (ask the agent for the map), `PR` resume, `Pq` close |
 | Move | `]w` `[w` next / previous entry, `]n` `[n` next / previous thread or finding, `P]` `P[` next / previous commit, `Pv` switch compact / file view, `Pp` map panel, `Ph` hide / show the text under the lines, `Pw` back to the current entry |
-| Write | `Pa` ask (also on a selection), `Pc` change request (also on a selection), `Pm` send, `Pt` open the thread, `PX` delete the thread, `P-` simpler, `P+` `P=` deeper |
+| Write | `Pa` ask (also on a selection), `Pc` change request (also on a selection), `Pm` send, `Pt` open the thread, `Po` open a link of the thread, `PX` delete the thread, `P-` simpler, `P+` `P=` deeper |
 | Decide | `Py` accept, `Pd` decline, `P0` clear (all three only mark; `Pm` sends) |
 | Approve | `Ps` stage, `PS` stage all, `Px` reject (discard the commit's unstaged lines), `Pb` base, `PC` commit |
 | Plan | `PA` approve the plan, `PF` send plan feedback |
@@ -178,10 +178,9 @@ the prefix.
 
 Panel: `<CR>` opens the entry, `s` `S` stage, `m` sends, `b` base, `x` reject,
 `?` cheat sheet. Thread float (`Pt`): `r` replies, `y` `d` accept / decline,
-`u` takes the decision back, `-` `+` `=` simpler / deeper, `X` deletes, `q`
-closes. Input window: `<CR>` sends, `<C-j>` new line, `<Esc>` (Normal mode) or
-`q` cancels. Plan: `A` approves, `F`
-sends feedback. Commit dialog: `<CR>` or `:w` commits, `<C-g>` asks the agent
+`u` takes the decision back, `o` opens a link, `-` `+` `=` simpler / deeper,
+`X` deletes, `q` closes. Input window: `<CR>` sends, `<C-j>` new line, `<Esc>`
+(Normal mode) or `q` cancels. Plan: `A` approves, `F` sends feedback. Commit dialog: `<CR>` or `:w` commits, `<C-g>` asks the agent
 for a message, `<C-r>` takes a message the agent proposed while you typed, `q`
 cancels.
 
