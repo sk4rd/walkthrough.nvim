@@ -168,11 +168,13 @@ local function comment_lines(d)
   if d.proposal then
     add('agent: a proposal arrived; <C-r> in normal mode replaces the text with it', 'DiagnosticInfo')
   elseif d.send_error then
-    add(('agent: not asked (%s); write the message yourself'):format(d.send_error), 'DiagnosticWarn')
+    add(('agent: could not be asked (%s); write the message yourself'):format(d.send_error), 'DiagnosticWarn')
   elseif d.awaiting then
     add('agent: waiting for a proposed message…')
-  else
+  elseif d.received then
     add('agent: message received')
+  else
+    add('agent: not asked; <C-g> in normal mode asks for a message')
   end
   for _, f in ipairs(d.files) do
     if not d.listed[f.path] then
@@ -263,6 +265,7 @@ end
 
 local function receive(d, text)
   d.awaiting = false
+  d.received = true
   -- Nothing typed in the message area yet: the proposal is the message.
   -- Otherwise it waits for <C-r>.
   if message_text(d) == vim.trim(d.inserted) then
@@ -557,7 +560,7 @@ local function open_window(d)
   d.win = vim.api.nvim_open_win(buf, true, {
     relative = 'editor', width = math.max(width, 20), height = 10, row = 0, col = 0,
     style = 'minimal', border = 'rounded',
-    title = ' Commit: <CR> commit · :w commit · q cancel ', title_pos = 'center',
+    title = ' <CR> or :w commit · <C-g> ask the agent · q cancel ', title_pos = 'center',
   })
   vim.wo[d.win].wrap = true
   vim.wo[d.win].linebreak = true
@@ -570,6 +573,8 @@ local function open_window(d)
   map('<CR>', function() commit_now(d) end, 'commit')
   map('q', function() cancel(d) end, 'cancel the commit')
   map('<Esc>', function() cancel(d) end, 'cancel the commit')
+  -- The message is the user's to write. The agent proposes one only on demand.
+  map('<C-g>', function() M.ask(d) end, 'ask the agent for a commit message')
   -- <C-r> takes a proposal that arrived while the user was typing; otherwise it stays redo.
   map('<C-r>', function()
     if d.proposal then
@@ -677,17 +682,36 @@ function M.commit()
 
   local d = {
     root = root, group = t.group, files = files, listed = listed, stat = vim.trim(stat.stdout or ''),
-    awaiting = true, inserted = t.commit_message or '',
+    awaiting = false, inserted = t.commit_message or '',
+    -- A message kept from an earlier dialog of this commit came from the agent.
+    received = (t.commit_message or '') ~= '',
   }
   dialogs[root] = d
   start_check(d)
   open_window(d)
+end
 
+--- Ask the agent for a commit message for the open dialog `d` (default: the
+--- dialog of the active tour's repository). On demand only: the dialog does
+--- not ask by itself. The answer arrives as a `commit_message` patch.
+function M.ask(d)
+  if not d then
+    local t = tours.active()
+    d = t and t.root and dialog_of(t.root) or nil
+  end
+  if not d then
+    return notify('no commit dialog is open', vim.log.levels.WARN)
+  end
+  if d.awaiting then
+    return notify('the agent was asked already; its message will appear here')
+  end
+  d.awaiting, d.send_error = true, nil
   local ok, err = pcall(send.send, { text = request(d), refs = {} })
   if not ok then
+    d.awaiting = false
     d.send_error = tour.clean_error(err)
-    render(d)
   end
+  render(d)
 end
 
 return M

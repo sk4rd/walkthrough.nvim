@@ -47,8 +47,8 @@ follow your confirmation.
 5. `Ps` stages the lines of the current commit in this file, `PS` in every
    file ([`git add`](https://git-scm.com/docs/git-add)), also where a file
    holds lines of other commits. `Px` discards the commit's unstaged lines.
-6. `PC` commits. The project's check runs on exactly what is staged, the agent
-   proposes a message, you edit or confirm, Neovim runs
+6. `PC` commits. The project's check runs on exactly what is staged, you write
+   the message or ask the agent for one with `<C-g>`, Neovim runs
    [`git commit`](https://git-scm.com/docs/git-commit). A failing check is
    shown but does not block. Then the commit's threads are deleted and the next
    commit is current.
@@ -181,8 +181,9 @@ Panel: `<CR>` opens the entry, `s` `S` stage, `m` sends, `b` base, `x` reject,
 `u` takes the decision back, `-` `+` `=` simpler / deeper, `X` deletes, `q`
 closes. Input window: `<CR>` sends, `<C-j>` new line, `<Esc>` (Normal mode) or
 `q` cancels. Plan: `A` approves, `F`
-sends feedback. Commit dialog: `<CR>` or `:w` commits, `<C-r>` takes a message
-the agent proposed while you typed, `q` cancels.
+sends feedback. Commit dialog: `<CR>` or `:w` commits, `<C-g>` asks the agent
+for a message, `<C-r>` takes a message the agent proposed while you typed, `q`
+cancels.
 
 ## What you see
 

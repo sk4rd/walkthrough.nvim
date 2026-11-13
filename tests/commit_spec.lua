@@ -167,7 +167,7 @@ local d = dialog()
 check('a dialog opens when a tour of a change has staged lines', d ~= nil and open_count() == 1)
 reset_log()
 w.commit()
-check('a second dialog for the repository: refused', find('already') ~= nil and open_count() == 1 and #requests() == 1,
+check('a second dialog for the repository: refused', find('already') ~= nil and open_count() == 1 and #requests() == 0,
   vim.inspect(log))
 
 -- The window ------------------------------------------------------------------------------
@@ -175,12 +175,13 @@ local cfg = vim.api.nvim_win_get_config(d.win)
 check('the dialog is a centered float with an editable scratch buffer', cfg.relative == 'editor'
   and vim.bo[d.buf].modifiable and vim.bo[d.buf].buftype == 'acwrite' and vim.api.nvim_get_current_win() == d.win)
 local title = table.concat(vim.tbl_map(function(c) return c[1] end, cfg.title), '')
-check('the title names the keys', title:match('<CR>') and title:match('q') and title:match(':w'), title)
+check('the title names the keys', title:match('<CR>') and title:match('q') and title:match(':w') and title:match('<C%-g>'), title)
 check('the message area is empty at first, then the # lines', vim.api.nvim_buf_get_lines(d.buf, 0, 1, false)[1] == ''
   and vim.api.nvim_buf_get_lines(d.buf, 1, 2, false)[1]:sub(1, 1) == '#', text(d))
 check('the # lines name the group and the staged file', text(d):match('# Commit: A') and text(d):match('M  a%.txt'), text(d))
 check('a staged file of the tour gets no warning', not text(d):match('not part of this commit'), text(d))
-check('the agent is awaited', text(d):match('# agent: waiting for a proposed message'), text(d))
+check('the agent is not asked by opening the dialog', #requests() == 0 and text(d):match('# agent: not asked; <C%-g>') ~= nil
+  and #vim.json.decode(w.inbox()).items == 0, text(d))
 check('status: the dialog, the check and no message', (function()
   local s = status().commit
   return s and s.group == 'A' and s.message == false and (s.check == 'running' or s.check == 'passed')
@@ -194,8 +195,15 @@ for i = #sent, 1, -1 do
   sent[i] = nil
 end
 w.commit()
+d = dialog()
+check('opening the dialog sends nothing', #requests() == 0)
+press('<C-g>')
 local req = requests()[1]
-check('one request is sent, at once', #requests() == 1 and req ~= nil)
+check('<C-g> sends one request', #requests() == 1 and req ~= nil)
+check('<C-g>: the dialog says the agent is awaited', text(d):match('# agent: waiting for a proposed message') ~= nil, text(d))
+reset_log()
+press('<C-g>')
+check('<C-g> again while waiting: no second request', #requests() == 1 and find('asked already') ~= nil, vim.inspect(log))
 local rq = req and req.text or ''
 check('the request names the group', rq:match('commit "A"') ~= nil, rq)
 check('the request holds the --stat of the staged files', rq:match('a%.txt%s+|%s+2') ~= nil and not rq:match('b%.txt'), rq)
@@ -222,9 +230,11 @@ st.config.sender = function()
   error('no agent terminal found', 0)
 end
 reset_log()
-check('a sender that raises does not raise out of commit', pcall(w.commit))
+w.commit()
 d = dialog()
-check('sending fails: the dialog says so', d ~= nil and text(d):match('# agent: not asked %(no agent terminal found%)'), d and text(d))
+check('a sender that raises does not raise out of the ask', pcall(w.commit_ask))
+check('sending fails: the dialog says so', d ~= nil and text(d):match('# agent: could not be asked %(no agent terminal found%)'), d and text(d))
+check('sending fails: nothing is pending, so the user can ask again', #vim.json.decode(w.inbox()).items == 0, w.inbox())
 type_message(d, { 'fix: typed by the user' })
 check('sending fails: the user can still type a message', status().commit.message == true)
 press('q')
@@ -422,7 +432,7 @@ w.commit()
 d = dialog()
 check('a message that arrived before the dialog opens is shown', vim.api.nvim_buf_get_lines(d.buf, 0, 1, false)[1] == 'feat(a): before the dialog'
   and status().commit.message == true, text(d))
-check('... and the agent is asked again', #requests() == asked_before + 1 and text(d):match('waiting for'), text(d))
+check('... and the agent is not asked again', #requests() == asked_before and text(d):match('# agent: message received') ~= nil, text(d))
 press('q')
 -- No tour is loaded: nothing to store the message on.
 w.close()
@@ -701,6 +711,7 @@ end
 w.commit()
 d = dialog()
 check('review: a dialog opens for the unnamed tour', d ~= nil and d.group == nil and text(d):match('# Commit: the staged changes') ~= nil, d and text(d))
+w.commit_ask()
 check('review: the request names no group and the patch has none', requests()[1] ~= nil and not requests()[1].text:match('commit "')
   and requests()[1].text:find('{ "commit_message": "<message>" }', 1, true) ~= nil, requests()[1] and requests()[1].text)
 check('review: the inbox item has no group', (function()

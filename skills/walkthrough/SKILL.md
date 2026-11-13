@@ -39,7 +39,7 @@ its `Expected:` lines say. If the user only says they sent something, read
 | `decision` rejected | leave the code as it is | none |
 | simpler / deeper | rewrite your last answer at that level; keep to it afterwards (`depth` in `--status`) | `{ "thread": "t1", "answer": "<new text>", "replace": true }`; for a finding patch its `detail` |
 | `map` | build the map (next section) | `tour.sh` calls |
-| `commit` | write the commit message | `{ "commit_message": "feat(net): ...", "group": "<commit>" }` |
+| `commit` | write the commit message. Only when this item arrives: never send one unasked | `{ "commit_message": "feat(net): ...", "group": "<commit>" }` |
 
 Commit message rules, word for word: "Conventional Commits. One line. Add
 further lines only when the change is really complex. Never add a

@@ -127,9 +127,9 @@ A. Review a finished change                           *walkthrough-scenario-a*
   5. Stage a commit with `Ps` (this file) or `PS` (every file). Exactly the
      commit's lines are staged, also in a file that holds lines of other
      commits (|walkthrough-stage|).
-  6. Commit with `PC`. The project's check runs on exactly what is staged, the
-     agent proposes a message, you edit or confirm, Neovim makes the commit
-     (|walkthrough-commit|).
+  6. Commit with `PC`. The project's check runs on exactly what is staged, you
+     write the message or ask the agent for one with <C-g>, Neovim makes the
+     commit (|walkthrough-commit|).
   7. The commit's threads are deleted and the next commit is current.
 
 B. Ask about existing code                            *walkthrough-scenario-b*
@@ -723,17 +723,11 @@ to), and while a range is stale. It cannot be undone.
 11. THE COMMIT DIALOG                                     *walkthrough-commit*
 
 Approval has two steps. Step one is staging. Step two is `:Walkthrough commit`
-(`PC`), which does three things at once:
+(`PC`), which does two things at once:
 
   1. It starts the project's check in the background, on exactly what is
      staged (|walkthrough-commit-check|). The editor is not blocked.
-  2. It asks the agent for a message through the sender: the commit, the
-     staged files (`git diff --cached --stat`), the rules "Conventional
-     Commits. One line. Add further lines only when the change is really
-     complex. Never add a Co-authored-by line." and the patch to answer with,
-     `{ "commit_message": "<message>", "group": "<commit>" }`
-     (|walkthrough-patch|). If sending fails, the dialog says so.
-  3. It opens a centered float with an editable buffer laid out like git's own
+  2. It opens a centered float with an editable buffer laid out like git's own
      message file: the message on top (empty at first, or the message stored
      for the commit), then lines that start with `#` and are never part of
      the message:
@@ -745,20 +739,29 @@ Approval has two steps. Step one is staging. Step two is `:Walkthrough commit`
     # Staged:
     #   M  net.nix
     # check: running…
-    # agent: message received
+    # agent: not asked; <C-g> in normal mode asks for a message
     #
     # Lines that start with # are not part of the message. <CR> commits, q cancels.
 <
 
 The `#` lines name the commit, the staged files, the state of the check
 (`check: running…`, `check: passed`, `check: FAILED` followed by the last 15
-lines of its output, `check: none defined`), whether the agent's message is
-awaited, and a warning for every staged file that is not an entry of the commit
+lines of its output, `check: none defined`), whether the agent was asked for a
+message, and a warning for every staged file that is not an entry of the commit
 (`staged but not part of this commit in the map: {file}`).
 
 It refuses, with a notification and no side effect, when there is no review,
 when only threads on other files are loaded, when nothing is staged, or when a
 commit dialog is open for the repository already.
+
+The message is yours to write. The agent is asked for one only on demand:
+<C-g> in Normal mode (or `require('walkthrough').commit_ask()`) sends the
+request through the sender: the commit, the staged files (`git diff --cached
+--stat`), the rules "Conventional Commits. One line. Add further lines only
+when the change is really complex. Never add a Co-authored-by line." and the
+patch to answer with, `{ "commit_message": "<message>", "group": "<commit>" }`
+(|walkthrough-patch|). If sending fails, the dialog says so and you can ask
+again. While the answer is awaited, a second <C-g> sends nothing.
 
 The agent's message is put into the dialog when you have typed nothing in the
 message area. If you have, it is not overwritten: a `#` line says that a
@@ -768,6 +771,7 @@ the cursor stay. A message that arrives before the dialog opens is stored on its
 commit (saved with it) and shown when the dialog opens. Keys in Normal mode:
 
   <CR>      commit. `:w` does the same.
+  <C-g>     ask the agent for a message.
   q  <Esc>  cancel. Nothing changes: what is staged stays staged, and the
             stored message is kept for the next time. Closing the dialog in
             any way stops a check that is still running.
@@ -1269,7 +1273,8 @@ in entry order, threads sorted by line. The item kinds (`kind`):
               (the proposal). On a finding: `group`, `step`, `note` (the
               number), `verdict`, `decision`, `file`, `line`, `text`.
   `commit`    `group`, `stat` (the text of `git diff --cached --stat`): you
-              asked for a commit message (|walkthrough-commit|). Listed until a
+              asked for a commit message with <C-g> in the commit dialog
+              (|walkthrough-commit|). Listed until a
               message arrived or the dialog was closed; reading the inbox does
               not deliver it. Answer with a patch `{ "commit_message": "...",
               "group": "..." }`.
@@ -1389,6 +1394,7 @@ notification (|vim.notify()|).
   reject_group()      discard the commit's unstaged lines
   commit()            check, message and commit what is staged
                       (|walkthrough-commit|)
+  commit_ask()        ask the agent for a message for the open commit dialog
   base()              the base version in a float
   keys()              the key cheat sheet in a float
   plan_show()         go to the tab of the plan under review

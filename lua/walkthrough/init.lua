@@ -794,6 +794,10 @@ M.reject_group = ui.safe(reject.reject_group)
 --- Step two of approval: run the check on what is staged, ask the agent for a
 --- message, and commit from a dialog (commit.lua).
 M.commit = ui.safe(commit.commit)
+--- Ask the agent for a message for the open commit dialog (the dialog's <C-g>).
+M.commit_ask = ui.safe(function()
+  commit.ask()
+end)
 M.base = ui.safe(base.show)
 M.keys = ui.safe(keys.show)
 --- The plan of the agent (plan.lua). `plan` and `plan_result` are the socket
