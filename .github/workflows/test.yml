@@ -1,0 +1,38 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        neovim: [stable, nightly]
+    steps:
+      - uses: actions/checkout@v4.2.2
+
+      - uses: rhysd/action-setup-vim@v1.6.1
+        with:
+          neovim: true
+          version: ${{ matrix.neovim }}
+
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
+
+      - name: Fetch gitsigns.nvim
+        run: |
+          git clone --depth 1 --branch v2.1.0 \
+            https://github.com/lewis6991/gitsigns.nvim "$RUNNER_TEMP/gitsigns.nvim"
+          echo "WALKTHROUGH_GITSIGNS=$RUNNER_TEMP/gitsigns.nvim" >> "$GITHUB_ENV"
+
+      - name: Plugin tests
+        run: tests/run.sh
+
+      - name: Script tests
+        run: tests/scripts.sh
+
+      - name: Shellcheck
+        run: shellcheck -x tests/*.sh skills/walkthrough/*.sh skills/walkthrough/hooks/*.sh
