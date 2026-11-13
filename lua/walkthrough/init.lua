@@ -61,6 +61,10 @@ local senders = { auto = true, claudecode = true, terminal = true, clipboard = t
 --- max_removed_lines, view, sender, submit, input, terminal_pattern, state_dir, keys })
 --- `keys`: true maps the default keys under <leader>w, a string uses that
 --- prefix, false (default) maps nothing.
+-- Looks at the files on screen for saved state to bring back (defined with
+-- the autocommands at the end of this file).
+local look_at_shown
+
 function M.setup(opts)
   opts = opts or {}
   if opts.panel_side and opts.panel_side ~= 'left' and opts.panel_side ~= 'right' then
@@ -81,7 +85,19 @@ function M.setup(opts)
   if opts.input ~= nil and opts.input ~= 'float' and opts.input ~= 'ui' then
     error('walkthrough: input must be "float" or "ui"')
   end
+  local state_dir = st.config.state_dir
   st.config = vim.tbl_extend('force', st.config, opts)
+  -- The saved state lives somewhere else now. A file that came on screen
+  -- before this call was looked up in the old directory: that answer says
+  -- nothing, so the repositories with nothing loaded are looked at again.
+  if st.config.state_dir ~= state_dir then
+    for root in pairs(st.restored) do
+      if not tours.has_root(root) then
+        st.restored[root] = nil
+      end
+    end
+    vim.schedule(look_at_shown)
+  end
   -- `keys` is true (prefix <leader>w), a prefix string, or false.
   local prefix = keys.prefix(st.config.keys)
   if prefix then
@@ -957,11 +973,12 @@ vim.api.nvim_create_autocmd('BufWinEnter', {
 -- The plugin may load after files are on screen (a lazy-loading plugin
 -- manager, or setup() called late): those windows had their BufWinEnter
 -- before anyone listened, so look at them once now.
-vim.schedule(function()
+look_at_shown = function()
   for _, win in ipairs(vim.api.nvim_list_wins()) do
     on_shown(vim.api.nvim_win_get_buf(win))
   end
-end)
+end
+vim.schedule(look_at_shown)
 -- Typing or saving flips the buffer's modified flag: show or clear the
 -- "unsaved changes" notice in the panel's winbar. BufModifiedSet alone does
 -- not fire for edits made by typing, and newer Neovim versions no longer

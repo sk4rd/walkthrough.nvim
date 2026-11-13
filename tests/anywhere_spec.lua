@@ -674,4 +674,35 @@ w.map()
 check('map: with nothing loaded it says so', st.panel_win == nil and find('nothing to show') ~= nil)
 
 reset()
+-- setup() names the state directory after a file is on screen already (`nvim
+-- file` with setup in a `-c` command, or a plugin manager that configures
+-- late): the file was looked up in the old directory, and is looked at again.
+do
+  reset()
+  local real_dir = st.config.state_dir
+  vim.cmd('edit ' .. vim.fn.fnameescape(x))
+  vim.api.nvim_win_set_cursor(0, { 2, 0 })
+  w.ask('kept over a restart?')
+  local id = st.tours[1] and st.tours[1].steps[1].threads[1].id
+  check('late setup: a thread on a file with no review is saved', id ~= nil and vim.fn.filereadable(store.path(store.root_of(x))) == 1)
+  -- A new session: nothing loaded, and the file was shown while the state
+  -- directory was still another one.
+  st.tours, st.active, st.restored, st.dir_roots = {}, 0, {}, {}
+  st.config.state_dir = vim.fn.tempname()
+  vim.fn.mkdir(st.config.state_dir, 'p')
+  vim.api.nvim_exec_autocmds('BufWinEnter', { buffer = vim.api.nvim_get_current_buf() })
+  check('late setup: nothing is found in the other directory', #st.tours == 0 and st.restored[store.root_of(x)] == true)
+  reset_log()
+  w.setup({ state_dir = real_dir })
+  check('late setup: the file on screen is looked at again, and its thread is back', H.wait(function()
+    return #st.tours == 1 and th(id) ~= nil
+  end) and count_threads(vim.api.nvim_get_current_buf()) == 1 and st.panel_win == nil and #log == 0, vim.inspect(log))
+  -- The same directory again: nothing is looked up twice.
+  st.tours, st.active = {}, 0
+  w.setup({ state_dir = real_dir })
+  vim.wait(50)
+  check('late setup: setup with the same directory restores nothing again', #st.tours == 0)
+  st.restored, st.dir_roots = {}, {}
+end
+
 H.finish()
