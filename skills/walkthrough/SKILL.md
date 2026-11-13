@@ -13,8 +13,8 @@ and `commit-check.sh`.
 
 Words: the **map** is the ordered list of commits of a change; a **commit**
 is a set of lines that builds on its own; its **entries** are its files; a
-**thread** is something the user wrote on lines, with the replies under it (a
-**question** or a **change request**); a **finding** is your note with a
+**thread** is something the user wrote on lines, with the replies under it (on
+code a **question** or a **change request**, on a plan a **comment**); a **finding** is your note with a
 verdict. In JSON a commit has `group` and `steps`, and a finding is a `note`.
 
 ## 1. Mode
@@ -106,8 +106,11 @@ can add an executable `.walkthrough/check` that exits non-zero on failure.
 
 With the optional hook `hooks/plan-review.sh`, leaving plan mode opens your plan
 in Neovim. If leaving plan mode is denied with a message that lists the user's
-annotations, answer each one with a thread patch, revise the plan, and present
-it again. The review continues in the same tab.
+comments (`Comment t1 on plan line 4:`), reply to every comment with a thread
+patch (`{ "thread": "t1", "answer": "..." }`), revise the plan where a comment
+asks for a change or shows that one is needed, and present it again. On a plan
+the user writes one kind of thread, a `comment`; the plugin does not tell a
+question from a change request there. The review continues in the same window.
 
 ## 8. Existing code
 

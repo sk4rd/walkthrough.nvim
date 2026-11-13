@@ -1,16 +1,16 @@
 # walkthrough.nvim
 
-In Neovim, annotate an agent's plan, its change, or any code; the working
-agent session answers and proposes next to the line; approved work becomes
+In Neovim, comment on an agent's plan, or ask questions and request changes on
+its change or any code; the working agent session answers and proposes next to the line; approved work becomes
 small commits that stand on their own.
 
 Words used below. The **map** is the ordered list of commits of a change, each
 with its files and one sentence per file. A **commit** is a set of lines, maybe
 from several files and only part of a file, that builds on its own; commits are
 ordered so that nothing depends on a later one. A **thread** is something you
-wrote on lines, with the replies under it: a **question** or a **change
-request**. A **finding** is a remark of the agent on a line, with a verdict
-(`keep`, `simplify`, `remove`, `moved`) and how it knows (`ran`, `read`,
+wrote on lines, with the replies under it: on code a **question** or a
+**change request**, on a plan a **comment**. A **finding** is a remark of the
+agent on a line, with a verdict (`keep`, `simplify`, `remove`, `moved`) and how it knows (`ran`, `read`,
 `opinion`). The **compact view** and the **file view** are the two ways to look
 at a change.
 
@@ -32,7 +32,7 @@ follow your confirmation.
 3. Read in the compact view. `]w` `[w` move between entries, `P]` `P[` between
    commits, `Pv` jumps to the same line in the real file and back. Lines of
    other commits are dimmed and labelled; lines in no commit are flagged.
-4. Annotate. `Pa` asks a question; the answer appears under the line.
+4. Write on lines. `Pa` asks a question; the answer appears under the line.
    `Pc` writes a change request; it is collected, `Pm` sends all of them, and
    the agent replies to each with a proposal. `Py` accepts a proposal or a
    finding, `Pd` declines it. A decision is collected too: the label says
@@ -66,11 +66,13 @@ survive a restart and are deleted when you close the session with `Pq`.
 ### Review a plan
 
 When the agent leaves plan mode, a hook hands the plan to Neovim and the agent
-waits. The plan opens in a new tab. Write questions (`Pa`) and change requests
-(`Pc`) on its lines. Press `A` to approve, or `F` to send your annotations back.
-The agent revises the plan and shows it again in the same tab, with its replies
-under your lines. Without a reachable Neovim, the agent's normal prompt
-appears. Claude Code first; the hook is the only part specific to it.
+waits. The plan opens in a window of the current tab, next to the agent's
+terminal. Write comments on its lines (`Pa` or `Pc`: in a plan both write the
+same comment, and comments are collected). Press `A` to approve, or `F` to send
+your comments back. The agent revises the plan and shows it again in the same
+window, with its replies under your lines. After `A`, the window shows what it
+showed before. Without a reachable Neovim, the agent's normal prompt appears.
+Claude Code first; the hook is the only part specific to it.
 
 ## Requirements
 
@@ -170,7 +172,7 @@ the prefix.
 |---|---|
 | Start | `Pr` review, `PM` request (ask the agent for the map), `PR` resume, `Pq` close |
 | Move | `]w` `[w` next / previous entry, `]n` `[n` next / previous thread or finding, `P]` `P[` next / previous commit, `Pv` switch compact / file view, `Pp` map panel, `Ph` hide / show the text under the lines, `Pw` back to the current entry |
-| Write | `Pa` ask (also on a selection), `Pc` change request (also on a selection), `Pm` send, `Pt` open the thread, `Po` open a link of the thread, `PX` delete the thread, `P-` simpler, `P+` `P=` deeper |
+| Write | `Pa` ask (also on a selection), `Pc` change request (also on a selection; in a plan both write a comment), `Pm` send, `Pt` open the thread, `Po` open a link of the thread, `PX` delete the thread, `P-` simpler, `P+` `P=` deeper |
 | Decide | `Py` accept, `Pd` decline, `P0` clear (all three only mark; `Pm` sends) |
 | Approve | `Ps` stage, `PS` stage all, `Px` reject (discard the commit's unstaged lines), `Pb` base, `PC` commit |
 | Plan | `PA` approve the plan, `PF` send plan feedback |

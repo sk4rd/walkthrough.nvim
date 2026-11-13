@@ -201,6 +201,14 @@ rejects('thread: id looks like t1', { file = f, threads = { thread({ id = 'c1' }
 rejects('thread: ids are unique', { file = f, threads = { thread(), thread({ from = 3, to = 3 }) } }, 'thread 2: id t1 is used twice', stored)
 rejects('thread: from and to', { file = f, threads = { thread({ from = 3, to = 2 }) } }, '"from" and "to" must be integers', stored)
 rejects('thread: kind', { file = f, threads = { thread({ kind = 'finding' }) } }, '"kind" must be question or change', stored)
+rejects('thread: a comment is no thread of a tour of code', { file = f, threads = { thread({ kind = 'comment' }) } },
+  '"kind" must be question or change', stored)
+local plan_opts = { stored = true, plan = true }
+check('thread: in a plan a comment is a thread', valid({ file = f, threads = { thread({ kind = 'comment' }) } }, plan_opts) == true)
+rejects('thread: in a plan a question is none', { file = f, threads = { thread() } }, '"kind" must be comment', plan_opts)
+rejects('thread: in a plan a change request is none', { file = f, threads = { thread({ kind = 'change' }) } }, '"kind" must be comment', plan_opts)
+check('thread: the kinds of a plan and of code are apart', next(tour.plan_thread_kinds) == 'comment'
+  and tour.thread_kinds.comment == nil and tour.plan_thread_kinds.question == nil)
 rejects('thread: state', { file = f, threads = { thread({ state = 'open' }) } }, '"state" is not a thread state', stored)
 rejects('thread: messages need one', { file = f, threads = { thread({ messages = {} }) } }, 'at least one message', stored)
 rejects('thread: message author', { file = f, threads = { thread({ messages = { { by = 'me', text = 'x' } } }) } }, 'message 1: "by" must be user or agent', stored)
@@ -215,6 +223,12 @@ check('patch: thread answer with a proposal', changed and changed[1].threads[1].
   and ht[1].threads[1].state == 'draft', vim.inspect(changed))
 _, err = tour.apply_patches(ht, 1, { { thread = 't1', answer = 'a', state = 'done' } })
 check('patch: no state from the agent', err and err:match('unknown thread field "state"'), err)
+local hc = { { file = f, threads = { thread({ kind = 'comment' }) } } }
+_, err = tour.apply_patches(hc, 1, { { thread = 't1', answer = 'a' } })
+check('patch: an answer in a comment thread is refused outside a plan', err and err:match('"kind" must be question or change'), err)
+changed = tour.apply_patches(hc, 1, { { thread = 't1', answer = 'a' } }, nil, { [1] = true })
+check('patch: ... and accepted in a plan step', changed and changed[1].threads[1].kind == 'comment'
+  and changed[1].threads[1].state == 'answered', vim.inspect(changed))
 check('thread ids: new ids are never reused', (function()
   local t = { steps = { { threads = { thread({ id = 't4' }) } } } }
   local a, b = tour.new_thread_id(t), tour.new_thread_id(t)

@@ -11,9 +11,12 @@ M.verdicts = { keep = true, simplify = true, remove = true, done = true, moved =
 -- How a note's claim was established: the agent ran something that shows it,
 -- inferred it from reading the code, or it is a judgement.
 M.evidence = { ran = true, read = true, opinion = true }
--- What a thread is (a question to answer, or a change request that gets a
--- proposal), where it stands, and the user's stances on a verdict.
+-- What a thread is in a review of code (a question to answer, or a change
+-- request that gets a proposal), where it stands, and the user's stances on a
+-- verdict. In a plan review (plan.lua) there is one kind, a comment, and
+-- nothing else: a tour of code refuses it, a plan refuses the two others.
 M.thread_kinds = { question = true, change = true }
+M.plan_thread_kinds = { comment = true }
 M.thread_states = {
   draft = true, waiting = true, answered = true, proposed = true, accepted = true, declined = true, done = true,
 }
@@ -122,8 +125,9 @@ function M.check_file(step)
 end
 
 --- Check one step. `opts.index` names it in messages, `opts.stored` also
---- accepts the plugin's own bookkeeping fields. Returns true, or nil and a
---- message such as `step 2, note 1: "line" is missing`.
+--- accepts the plugin's own bookkeeping fields, `opts.plan` says it is the
+--- step of a plan review, whose threads are comments. Returns true, or nil and
+--- a message such as `step 2, note 1: "line" is missing`.
 function M.validate_step(step, opts)
   opts = opts or {}
   -- A lone step has no number to name it by.
@@ -185,8 +189,8 @@ function M.validate_step(step, opts)
       if not is_int(th.from, 1) or not is_int(th.to, th.from) then
         return fail(sub, '"from" and "to" must be integers, 1 <= from <= to')
       end
-      if not M.thread_kinds[th.kind] then
-        return fail(sub, '"kind" must be question or change')
+      if not (opts.plan and M.plan_thread_kinds or M.thread_kinds)[th.kind] then
+        return fail(sub, opts.plan and '"kind" must be comment' or '"kind" must be question or change')
       end
       if not M.thread_states[th.state] then
         return fail(sub, '"state" is not a thread state')
@@ -782,11 +786,12 @@ end
 --- Item `step` defaults to `default_n`. Only the first `limit` steps (default
 --- all) can be named by number; a thread patch without `step` finds its
 --- thread in the whole of `history`, which is how threads of other tours are
---- reached. Returns changed, moved (both keyed by step index) and `commits`
---- (the commit messages the list delivers, `{ i, group, text }`, for the
+--- reached. `plans` is the set of indices in `history` that are the steps of
+--- a plan review (their threads are comments). Returns changed, moved (both
+--- keyed by step index) and `commits` (the commit messages the list delivers, `{ i, group, text }`, for the
 --- caller to store), or nil and a message; `history` itself is never modified,
 --- so a failing list changes nothing.
-function M.apply_patches(history, default_n, patches, limit)
+function M.apply_patches(history, default_n, patches, limit, plans)
   limit = limit or #history
   local changed, moved, commits = {}, {}, {}
   for i, p in ipairs(patches) do
@@ -824,7 +829,7 @@ function M.apply_patches(history, default_n, patches, limit)
     end
   end
   for n, step in pairs(changed) do
-    local ok, err = M.validate_step(step, { index = n, stored = true })
+    local ok, err = M.validate_step(step, { index = n, stored = true, plan = plans and plans[n] or nil })
     if not ok then
       return nil, err
     end

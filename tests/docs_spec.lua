@@ -42,6 +42,7 @@ local tables = {
   { 'evidence values', tour.evidence },
   { 'thread states', tour.thread_states },
   { 'thread kinds', tour.thread_kinds },
+  { 'plan thread kinds', tour.plan_thread_kinds },
   { 'inbox item kinds', require('walkthrough.feedback').inbox_kinds },
   { 'thread patch fields', tour.thread_patch_fields },
   { 'commit message patch fields', tour.commit_patch_fields },
@@ -64,6 +65,29 @@ check('every inbox item kind is one of the five', vim.deep_equal(names(require('
   { 'change', 'commit', 'decision', 'map', 'question' }))
 check('every thread state is one of the seven', vim.deep_equal(names(tour.thread_states),
   { 'accepted', 'answered', 'declined', 'done', 'draft', 'proposed', 'waiting' }))
+
+-- A plan has comments, and the documents say how they are written and sent.
+check('the plan has one kind of thread, the comment', vim.deep_equal(names(tour.plan_thread_kinds), { 'comment' }))
+for _, phrase in ipairs({ 'Comment on plan line 4', 'Comment on plan lines 4-6', 'Comment t1 on plan line 4:' }) do
+  check('doc/walkthrough.txt names "' .. phrase .. '"', help:find(phrase, 1, true) ~= nil)
+end
+check('references/format.md names the label of a comment in the plan feedback', format:find('Comment t1 on plan line 4:', 1, true) ~= nil)
+
+-- The word "annotation" is not used for what the user writes. The user documents
+-- have no "annotat" at all, except in the name of the Lua function `annotate`
+-- where the API lists it.
+local user_docs = { 'doc/walkthrough.txt', 'README.md', 'skills/walkthrough/SKILL.md' }
+local references = vim.fn.glob(root .. '/skills/walkthrough/references/*.md', false, true)
+check('the references are found', #references >= 2, #references)
+for _, path in ipairs(references) do
+  table.insert(user_docs, path:sub(#root + 2))
+end
+for _, path in ipairs(user_docs) do
+  local text = read(path):gsub('annotate%(', '')
+  local at = text:lower():find('annotat', 1, true)
+  check(path .. ' does not say "annotation"', at == nil, at and text:sub(math.max(1, at - 40), at + 40) or '')
+end
+check('the API list still names the Lua function annotate', help:find('  annotate(', 1, true) ~= nil)
 
 -- Subcommands: whatever :Walkthrough completes.
 local subcommands = vim.fn.getcompletion('Walkthrough ', 'cmdline')

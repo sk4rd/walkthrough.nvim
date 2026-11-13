@@ -316,6 +316,31 @@ vim.fn.writefile({ (format1:gsub('"version":1', '"version":3')) }, store.path(ol
 check('an unknown newer format is still refused', w.resume():match('unknown format') ~= nil)
 reset()
 
+-- A comment is a thread of a plan only ---------------------------------------------------
+reset()
+repo = H.repo({ ['a.txt'] = lines(6), ['b.txt'] = lines(6, 'b') },
+  { ['a.txt'] = edited(lines(6), 2, 2, 'NEW'), ['b.txt'] = edited(lines(6, 'b'), 2, 2, 'NEW') })
+cd(repo)
+a, b = repo .. '/a.txt', repo .. '/b.txt'
+root = store.root_of(a)
+send('load', { group = 'K', steps = { { file = a, title = 'one' }, { file = b, title = 'two' } } })
+vim.cmd('edit ' .. vim.fn.fnameescape(a))
+w.ask('why here?', { 2, 2 })
+w.change('rename it', { 3, 3 })
+vim.cmd('edit ' .. vim.fn.fnameescape(b))
+w.change('and this', { 2, 2 })
+local kinds_saved = vim.tbl_map(function(th) return th.kind end, saved(root).tours[1].steps[1].threads)
+check('in a review of code a question and a change request are saved as such', vim.deep_equal(kinds_saved, { 'question', 'change' })
+  and saved(root).tours[1].steps[2].threads[1].kind == 'change', vim.inspect(kinds_saved))
+local forged = saved(root)
+forged.tours[1].steps[1].threads[1].kind = 'comment'
+w.close()
+vim.fn.writefile({ vim.json.encode(forged) }, store.path(root))
+check('a saved comment in a tour of code is refused like any unknown kind: its step is dropped, the other stays',
+  w.resume() == 'ok' and #st.history == 1 and st.history[1].title == 'two' and st.history[1].threads[1].kind == 'change',
+  vim.inspect(st.history))
+reset()
+
 -- A corrupt state file -------------------------------------------------------------------------------------
 cd(r1)
 vim.fn.writefile({ '{ not json' }, store.path(root1))

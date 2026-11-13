@@ -380,7 +380,7 @@ else
   echo "skip hook tests (jq is not installed)"
 fi
 
-# ---- the plan review hook against a real headless Neovim: annotate, send
+# ---- the plan review hook against a real headless Neovim: comment, send
 # feedback, a revised plan, an answer of the agent, approve
 
 if [[ -n $real_nvim ]] && command -v jq >/dev/null 2>&1; then
@@ -421,16 +421,16 @@ if [[ -n $real_nvim ]] && command -v jq >/dev/null 2>&1; then
     plan_input $'Plan\n1. first step\n2. second step\n3. third step' | jq '.session_id = "rt-sess"' >"$work/rt-in1.json"
     rt_hook "$work/rt-in1.json" "$work/rt-out1"
     h1=$rt_hook_pid
-    if rt_wait_for "tabpagenr('\$')" 2; then ok "plan round trip: the plan opens in a tab"; else bad "plan round trip: the plan opens in a tab" "$(cat "$work/rt-nvim.log")"; fi
-    if rt_wait_for "getline(1)" Plan; then ok "plan round trip: the plan tab shows the plan"; else bad "plan round trip: the plan tab shows the plan"; fi
+    if rt_wait_for "getline(1)" Plan; then ok "plan round trip: the plan opens in the current window"; else bad "plan round trip: the plan opens in the current window" "$(cat "$work/rt-nvim.log")"; fi
+    if [[ $(rt "tabpagenr('\$') . ',' . winnr('\$')") == 1,1 ]]; then ok "plan round trip: no tab and no window is made for it"; else bad "plan round trip: no tab and no window is made for it"; fi
     if [[ $(rt "&modifiable") == 0 ]]; then ok "plan round trip: the plan is read-only"; else bad "plan round trip: the plan is read-only"; fi
     if kill -0 "$h1" 2>/dev/null; then ok "plan round trip: the hook waits"; else bad "plan round trip: the hook waits"; fi
 
     rt "v:lua.require'walkthrough'.change('make step two smaller', [3, 3])" >/dev/null
     rt "v:lua.require'walkthrough'.ask('why three steps?', [4, 4])" >/dev/null
     status=$(rt "v:lua.require'walkthrough'.status()")
-    if [[ $(jq -r '.plan.threads' <<<"$status") == 2 && $(jq -r '.plan.state' <<<"$status") == pending ]]; then ok "plan round trip: both annotations are collected, status has the plan"; else bad "plan round trip: both annotations are collected, status has the plan" "$status"; fi
-    if kill -0 "$h1" 2>/dev/null; then ok "plan round trip: annotating does not release the hook"; else bad "plan round trip: annotating does not release the hook"; fi
+    if [[ $(jq -r '.plan.threads' <<<"$status") == 2 && $(jq -r '.plan.state' <<<"$status") == pending ]]; then ok "plan round trip: both comments are collected, status has the plan"; else bad "plan round trip: both comments are collected, status has the plan" "$status"; fi
+    if kill -0 "$h1" 2>/dev/null; then ok "plan round trip: commenting does not release the hook"; else bad "plan round trip: commenting does not release the hook"; fi
     rt "v:lua.require'walkthrough'.plan_feedback()" >/dev/null
     rt_finish "$h1"; code=$?
     out=$(cat "$work/rt-out1")
@@ -440,12 +440,13 @@ if [[ -n $real_nvim ]] && command -v jq >/dev/null 2>&1; then
       bad "plan round trip: feedback ends the hook with a deny" "$code $out $(cat "$work/rt-out1.err")"
     fi
     fb=$(jq -r '.hookSpecificOutput.decision.message' <<<"$out")
-    if [[ $fb == *"Change request t1 on plan line 3:"* && $fb == *"> 2. second step"* && $fb == *"make step two smaller"* && $fb == *"Question t2 on plan line 4:"* && $fb == *"why three steps?"* && $fb == *'"thread": "<id>"'* ]]; then
-      ok "plan round trip: the message has both annotations, their lines and the instruction"
+    if [[ $fb == *"Comment t1 on plan line 3:"* && $fb == *"> 2. second step"* && $fb == *"make step two smaller"* && $fb == *"Comment t2 on plan line 4:"* && $fb == *"why three steps?"* && $fb == *'"thread": "<id>"'* && $fb == *"revise the plan where a comment asks for a change"* ]]; then
+      ok "plan round trip: the message has both comments, their lines and the instruction"
     else
-      bad "plan round trip: the message has both annotations, their lines and the instruction" "$fb"
+      bad "plan round trip: the message has both comments, their lines and the instruction" "$fb"
     fi
-    if [[ $(rt "tabpagenr('\$')") == 2 ]]; then ok "plan round trip: the tab stays open"; else bad "plan round trip: the tab stays open"; fi
+    if [[ $fb != *Question* && $fb != *"Change request"* ]]; then ok "plan round trip: the message names no question and no change request"; else bad "plan round trip: the message names no question and no change request" "$fb"; fi
+    if [[ $(rt "tabpagenr('\$') . ',' . winnr('\$') . ',' . getline(1)") == 1,1,Plan ]]; then ok "plan round trip: the plan stays on screen"; else bad "plan round trip: the plan stays on screen"; fi
     status=$(rt "v:lua.require'walkthrough'.status()")
     if [[ $(jq -r '.plan.state' <<<"$status") == feedback-sent ]]; then ok "plan round trip: the plan waits for the revision"; else bad "plan round trip: the plan waits for the revision" "$status"; fi
     if [[ -z $(ls -A "$work/rt-tmp") ]]; then ok "plan round trip: the hook left no temporary file"; else bad "plan round trip: the hook left no temporary file" "$(ls -A "$work/rt-tmp")"; fi
@@ -454,11 +455,12 @@ if [[ -n $real_nvim ]] && command -v jq >/dev/null 2>&1; then
     plan_input $'Plan\nNote: revised\n1. first step\n2. second step\n3. third step, rewritten' | jq '.session_id = "rt-sess"' >"$work/rt-in2.json"
     rt_hook "$work/rt-in2.json" "$work/rt-out2"
     h2=$rt_hook_pid
-    if rt_wait_for "getline(2)" "Note: revised"; then ok "plan round trip: the revised plan replaces the text in the same tab"; else bad "plan round trip: the revised plan replaces the text in the same tab"; fi
-    if [[ $(rt "tabpagenr('\$')") == 2 ]]; then ok "plan round trip: no second tab for the revision"; else bad "plan round trip: no second tab for the revision"; fi
+    if rt_wait_for "getline(2)" "Note: revised"; then ok "plan round trip: the revised plan replaces the text in the same window"; else bad "plan round trip: the revised plan replaces the text in the same window"; fi
+    if [[ $(rt "tabpagenr('\$') . ',' . winnr('\$')") == 1,1 ]]; then ok "plan round trip: no second tab or window for the revision"; else bad "plan round trip: no second tab or window for the revision"; fi
     th() { rt "luaeval('require(\"walkthrough.tours\").plans()[1].steps[1].threads[$1].$2')"; }
-    if [[ $(th 1 from) == 4 && $(th 1 id) == t1 ]]; then ok "plan round trip: the change request followed its line"; else bad "plan round trip: the change request followed its line" "$(th 1 from)"; fi
-    if [[ $(th 2 from) == 5 ]]; then ok "plan round trip: the question followed its line"; else bad "plan round trip: the question followed its line" "$(th 2 from)"; fi
+    if [[ $(th 1 from) == 4 && $(th 1 id) == t1 ]]; then ok "plan round trip: the first comment followed its line"; else bad "plan round trip: the first comment followed its line" "$(th 1 from)"; fi
+    if [[ $(th 1 kind) == comment && $(th 2 kind) == comment ]]; then ok "plan round trip: both threads are comments, written with ask and change"; else bad "plan round trip: both threads are comments, written with ask and change" "$(th 1 kind) $(th 2 kind)"; fi
+    if [[ $(th 2 from) == 5 ]]; then ok "plan round trip: the second comment followed its line"; else bad "plan round trip: the second comment followed its line" "$(th 2 from)"; fi
     if [[ $(th 2 stale) == true ]]; then ok "plan round trip: a thread on a rewritten line is stale"; else bad "plan round trip: a thread on a rewritten line is stale" "$(th 2 stale)"; fi
     if [[ $(th 1 stale) != true ]]; then ok "plan round trip: a thread on an untouched line is not stale"; else bad "plan round trip: a thread on an untouched line is not stale"; fi
     if [[ $(th 2 state) == waiting ]]; then ok "plan round trip: the delivered thread waits for the agent"; else bad "plan round trip: the delivered thread waits for the agent" "$(th 2 state)"; fi
@@ -472,7 +474,7 @@ if [[ -n $real_nvim ]] && command -v jq >/dev/null 2>&1; then
     if [[ $out == ok ]]; then ok "plan round trip: tour.sh --patch answers a thread of the plan"; else bad "plan round trip: tour.sh --patch answers a thread of the plan" "$out"; fi
     if [[ $(th 2 state) == answered ]]; then ok "plan round trip: the thread is answered"; else bad "plan round trip: the thread is answered" "$(th 2 state)"; fi
 
-    # Approve: the hook gets the allow object, the tab and the plan file go.
+    # Approve: the hook gets the allow object, the plan and its file go.
     rt "v:lua.require'walkthrough'.plan_approve()" >/dev/null
     rt_finish "$h2"; code=$?
     out=$(cat "$work/rt-out2")
@@ -483,7 +485,7 @@ if [[ -n $real_nvim ]] && command -v jq >/dev/null 2>&1; then
     else
       bad "plan round trip: approve ends the hook with the allow object and the tool input" "$code $out $(cat "$work/rt-out2.err")"
     fi
-    if [[ $(rt "tabpagenr('\$')") == 1 ]]; then ok "plan round trip: the tab is gone"; else bad "plan round trip: the tab is gone"; fi
+    if [[ $(rt "tabpagenr('\$') . ',' . winnr('\$') . ',[' . bufname('%') . ']'") == '1,1,[]' ]]; then ok "plan round trip: the window shows its old buffer again"; else bad "plan round trip: the window shows its old buffer again" "$(rt "bufname('%')")"; fi
     if [[ ! -e $rt_state/plans/rt-sess-1.md ]]; then ok "plan round trip: the plan file is gone"; else bad "plan round trip: the plan file is gone" "$(ls "$rt_state/plans")"; fi
     status=$(rt "v:lua.require'walkthrough'.status()")
     if [[ $(jq -r '.plan // "none"' <<<"$status") == none ]]; then ok "plan round trip: no plan under review afterwards"; else bad "plan round trip: no plan under review afterwards" "$status"; fi
@@ -493,7 +495,7 @@ if [[ -n $real_nvim ]] && command -v jq >/dev/null 2>&1; then
     plan_input $'Another plan' | jq '.session_id = "rt-gone"' >"$work/rt-in3.json"
     rt_hook "$work/rt-in3.json" "$work/rt-out3"
     h3=$rt_hook_pid
-    rt_wait_for "tabpagenr('\$')" 2 >/dev/null
+    rt_wait_for "getline(1)" "Another plan" >/dev/null
     rt "execute('qall!')" >/dev/null 2>&1
     rt_finish "$h3"; code=$?
     if [[ $code == 0 && ! -s $work/rt-out3 ]]; then ok "plan round trip: closing Neovim leaves the hook silent, exit 0"; else bad "plan round trip: closing Neovim leaves the hook silent, exit 0" "$code $(cat "$work/rt-out3")"; fi

@@ -232,6 +232,10 @@ the thread back to `proposed` and the old decision is void.
 | `commit` | `group`, `stat` (the text of `git diff --cached --stat`) | `{ "commit_message": "...", "group": "..." }`. Listed until a message arrived or the dialog closed; reading does not deliver it |
 | `map` | `root`, `base`, `files` (relative to `root`) | build the map and send it (below). Listed until a map arrives, `--close` or the review is discarded; reading does not deliver it |
 
+A thread on a plan (see Plan review) has the kind `comment`, the only kind
+there. `--inbox` does not list it: it reaches you in the plan feedback message.
+Reply as to a `question`: `{ "thread": "t1", "answer": "..." }`.
+
 ```json
 { "group": "Share the LAN constants", "items": [
   { "kind": "question", "id": "t1", "group": "Share the LAN constants", "step": 1,
@@ -284,11 +288,14 @@ threads are gone and the next commit of the map is shown.
 
 A hook, not you, hands your plan to Neovim when you leave plan mode (Claude
 Code: a `PermissionRequest` hook for `ExitPlanMode`, `hooks/plan-review.sh`).
-You wait in the hook. The user annotates the plan and approves it, or sends
-feedback: the hook denies leaving plan mode with one message that lists the
-annotations, each a question or a change request with the plan lines it is
-about and the user's text. Answer **every** item with a thread patch before you
-present the plan again, and revise the plan for each change request. Showing
+You wait in the hook. The user writes comments on the plan and approves it, or
+sends feedback: the hook denies leaving plan mode with one message that lists
+the comments, each labelled `Comment t1 on plan line 4:` (or `lines 4-6`), with
+the plan lines it is about and the user's text. A comment is a thread of kind
+`comment`: the only kind on a plan, whichever key the user used. Reply to
+**every** comment with a thread patch (`{ "thread": "t1", "answer": "..." }`)
+before you present the plan again, and revise the plan where a comment asks for
+a change or shows that one is needed. Showing
 the revised plan reaches the same review: the threads stay and follow their
 lines (rewritten lines make a thread stale), and your answers are drawn under
 the user's lines. The socket entry points the hook uses are `plan` (the hook

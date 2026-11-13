@@ -1,4 +1,4 @@
--- Annotate a plan, a change or any code in Neovim; the agent is driven from
+-- Comment on a plan, a change or any code in Neovim; the agent is driven from
 -- outside Neovim over its server socket.
 --
 -- An external process (an agent) writes a commit of the map as JSON and calls:
@@ -24,7 +24,7 @@
 --   base.lua      the base version of the file in a float
 --   compact.lua   the compact view: the changed parts of a tour's files in one buffer
 --   commit.lua    step two of approval: check, message and commit what is staged
---   plan.lua      the agent's plan as a document to annotate, approve or send back
+--   plan.lua      the agent's plan as a document to comment on, approve or send back
 --   request.lua   asking the agent for the map of the change under review
 --   snapshot.lua  the working tree as a commit under refs/walkthrough/
 --   keys.lua      the default keys (setup) and the key cheat sheet
@@ -261,11 +261,12 @@ M.patch = socket(function(path)
   -- tours (only threads are addressed there, by id). Without an active tour,
   -- the steps of every loaded tour.
   local active = tours.active()
-  local history, owners, reach = {}, {}, 0
+  local history, owners, reach, plan_steps = {}, {}, 0, {}
   local function add(t)
     for i, step in ipairs(t.steps) do
       table.insert(history, step)
       owners[#history] = { t = t, i = i }
+      plan_steps[#history] = t.plan or nil
     end
   end
   if active then
@@ -303,7 +304,7 @@ M.patch = socket(function(path)
       end
     end
   end
-  local changed, moved, commits = tour.apply_patches(history, st.pos, patches, reach)
+  local changed, moved, commits = tour.apply_patches(history, st.pos, patches, reach, plan_steps)
   if not changed then
     error(moved, 0)
   end

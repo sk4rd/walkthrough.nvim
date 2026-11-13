@@ -139,10 +139,11 @@ local function revive(t, root)
     return nil
   end
   local steps, pos = {}, nil
+  local is_plan = t.plan == true
   for i, s in ipairs(t.steps) do
     local keep = type(s) == 'table' and type(s.file) == 'string' and vim.fn.filereadable(s.file) == 1
     -- A malformed step may fail anywhere in sync; it is dropped then.
-    keep = keep and pcall(tour.sync, s) and tour.validate_step(s, { stored = true }) == true
+    keep = keep and pcall(tour.sync, s) and tour.validate_step(s, { stored = true, plan = is_plan }) == true
     if keep then
       table.insert(steps, s)
     end
@@ -209,6 +210,16 @@ local function migrate(data)
               table.insert(threads, ok and tour.thread_from_comment(c) or c)
             end
             s.threads, s.comments = s.threads or threads, nil
+          end
+          -- In a plan review there is one kind of thread, a comment: threads
+          -- saved as questions or change requests become comments, with all
+          -- their messages.
+          if t.plan == true then
+            for _, th in ipairs(type(s.threads) == 'table' and s.threads or {}) do
+              if type(th) == 'table' and tour.thread_kinds[th.kind] then
+                th.kind = 'comment'
+              end
+            end
           end
           -- Before decisions were collected, a thread whose decision the
           -- agent was not told was accepted or declined already; it is a

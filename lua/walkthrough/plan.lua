@@ -3,17 +3,18 @@
 -- When the agent leaves plan mode, a hook (skills/walkthrough/hooks/plan-review.sh)
 -- hands the plan over with `plan(path)` and then asks `plan_result(id)` about
 -- once a second. The plan is stored as a file, `<state_dir>/plans/<id>.md`,
--- and opened read-only in a tab of its own. It is a tour flagged `plan`
--- with one entry, the plan file, so the threads (annotations) work as on any
--- code: they follow edits, are drawn under the lines, are saved, and the agent
--- answers them with ordinary thread patches. A plan is in no map and no
--- other action (review, stage, commit, send, inbox) sees it.
+-- and opened read-only in a window of the current tab, next to the agent's
+-- terminal (see "Where the plan is shown"). It is a tour flagged `plan`
+-- with one entry, the plan file, so the threads work as on any code: they
+-- follow edits, are drawn under the lines, are saved, and the agent answers
+-- them with ordinary thread patches. A plan is in no map and no other action
+-- (review, stage, commit, send, inbox) sees it.
 --
--- The user writes questions and change requests on the plan's lines; both
--- are collected. `approve` lets the plan through. `feedback` sends the
--- annotations back, the agent revises the plan and shows it again (`plan`
--- again for the same session: the same review, the same tab, the threads
--- kept and moved along with the text).
+-- The user writes comments on the plan's lines (one kind of thread, whichever
+-- of `ask` and `change` is used; feedback.lua), all collected. `approve` lets
+-- the plan through. `feedback` sends the comments back, the agent revises
+-- the plan and shows it again (`plan` again for the same session: the same
+-- review, the same window, the threads kept and moved along with the text).
 --
 -- The review lives on the tour: `plan_id`, `plan_session`, `plan_state`
 -- ('pending' or 'feedback-sent') and, until the hook has taken it,
@@ -141,7 +142,7 @@ local function target(id)
   if #all == 0 then
     error('no plan is waiting for review', 0)
   elseif #all > 1 then
-    error('several plans are waiting: do this in the tab of the plan', 0)
+    error('several plans are waiting: do this in the window of the plan', 0)
   end
   return all[1]
 end
@@ -169,7 +170,10 @@ local function winbar_text(t)
     return keys and (keys[1] .. ' ' .. word) or (':Walkthrough ' .. name)
   end
   local state = t.plan_state == 'feedback-sent' and 'feedback sent; waiting for the revised plan' or 'waiting for you'
-  local hints = { 'A approve', 'F feedback', label('ask', 'ask'), label('change', 'change') }
+  -- `ask` and `change` write the same comment: one of them is named.
+  local write = mapped.ask and label('ask', 'comment') or mapped.change and label('change', 'comment')
+    or ':Walkthrough ask to comment'
+  local hints = { 'A approve', 'F feedback', write }
   return '%#WalkthroughBadge# Plan %*  ' .. esc(state) .. '  %#Comment#' .. esc(table.concat(hints, ' · '))
 end
 
@@ -190,7 +194,10 @@ end
 -- The buffer of a plan: read-only markdown, with the keys of the review.
 local function setup_buffer(t, buf)
   vim.bo[buf].swapfile = false
-  vim.bo[buf].filetype = 'markdown'
+  -- Not set again when it is shown again: that would run the FileType autocmds again.
+  if vim.bo[buf].filetype ~= 'markdown' then
+    vim.bo[buf].filetype = 'markdown'
+  end
   vim.bo[buf].readonly = true
   vim.bo[buf].modifiable = false
   vim.keymap.set('n', 'A', ui.safe(function()
@@ -212,24 +219,184 @@ local function setup_buffer(t, buf)
   })
 end
 
--- A new tab with the plan; the other tabs and their windows are not touched.
-local function open_tab(t)
-  t.plan_from = vim.api.nvim_get_current_tabpage()
-  vim.cmd('noswapfile tabedit ' .. vim.fn.fnameescape(t.steps[1].file))
-  local buf = vim.api.nvim_get_current_buf()
+-- Where the plan is shown ---------------------------------------------------------
+--
+-- The plan goes into a window of the current tab that holds code, so the
+-- agent's terminal stays on screen. When the review ends, the window shows
+-- again what it showed before the first plan.
+
+-- The plan window and what it showed before: `{ win, buf, view, split, from }`.
+-- `split` says the window was made for the plan; `from` is the window the user
+-- came from. Nil while no plan is on screen.
+local place
+
+-- The review whose plan the buffer shows, if any.
+local function plan_of_buf(buf)
+  for _, t in ipairs(tours.plans()) do
+    if buffer_of(t) == buf then
+      return t
+    end
+  end
+end
+
+local function is_float(win)
+  return vim.api.nvim_win_get_config(win).relative ~= ''
+end
+
+-- Whether the plan may take the window: it is in this tab and holds code
+-- (a file, or the compact view of the review), and it is no terminal, panel,
+-- float or window fixed to its buffer.
+local function fits(win)
+  if not (win and win > 0 and vim.api.nvim_win_is_valid(win)) then
+    return false
+  end
+  if vim.api.nvim_win_get_tabpage(win) ~= vim.api.nvim_get_current_tabpage()
+    or win == st.panel_win or is_float(win) or vim.wo[win].winfixbuf then
+    return false
+  end
+  local buf = vim.api.nvim_win_get_buf(win)
+  return vim.bo[buf].buftype == '' or vim.b[buf].walkthrough_compact == true
+end
+
+-- The window for a plan that is not on screen: the code window of the review,
+-- else the window in use most recently (the current one, the previous one,
+-- then the others in order).
+local function pick_window()
+  if fits(st.code_win) then
+    return st.code_win
+  end
+  local previous = vim.fn.winnr('#')
+  local order = { vim.api.nvim_get_current_win(), previous > 0 and vim.fn.win_getid(previous) or 0 }
+  vim.list_extend(order, vim.api.nvim_tabpage_list_wins(0))
+  for _, win in ipairs(order) do
+    if fits(win) then
+      return win
+    end
+  end
+end
+
+-- Show `buf` in `win`, which keeps the alternate file. Raises when the buffer
+-- in it cannot be left (unsaved changes, 'nohidden').
+local function put_buf(win, buf)
+  vim.api.nvim_win_call(win, function()
+    vim.cmd('keepalt buffer ' .. buf)
+  end)
+end
+
+-- A vertical split for the plan beside the terminal (else beside the current
+-- window), on the side of it that faces the middle of the screen, so the
+-- terminal stays where it is; a window that fills the screen gets the plan on
+-- its left. Returns the window.
+local function open_split(buf)
+  local wins = vim.tbl_filter(function(win)
+    return not is_float(win)
+  end, vim.api.nvim_tabpage_list_wins(0))
+  local current = vim.api.nvim_get_current_win()
+  local anchor
+  for _, win in ipairs({ current, unpack(wins) }) do
+    if not anchor and vim.tbl_contains(wins, win) and vim.bo[vim.api.nvim_win_get_buf(win)].buftype == 'terminal' then
+      anchor = win
+    end
+  end
+  anchor = anchor or (vim.tbl_contains(wins, current) and current or wins[1])
+  local middle = vim.api.nvim_win_get_position(anchor)[2] + vim.api.nvim_win_get_width(anchor) / 2
+  return vim.api.nvim_open_win(buf, true, { split = middle < vim.o.columns / 2 and 'right' or 'left', win = anchor })
+end
+
+-- Leave Insert, Replace or Terminal mode, so that the first key in the window
+-- we go to is a Normal mode key.
+local function leave_modes()
+  if vim.api.nvim_get_mode().mode:match('^[itR]') then
+    vim.cmd('stopinsert')
+  end
+end
+
+-- The loaded buffer of the plan's file with its keys (the file is loaded
+-- without a swap file).
+local function plan_buffer(t)
+  local buf = buffer_of(t) or vim.fn.bufadd(vim.fn.fnamemodify(t.steps[1].file, ':p'))
+  if not vim.api.nvim_buf_is_loaded(buf) then
+    vim.cmd(('noswapfile call bufload(%d)'):format(buf))
+  end
   setup_buffer(t, buf)
-  set_winbar(t)
-  ui.redraw_threads()
   return buf
 end
 
--- The tab of the plan, opened again when it was closed.
+-- Show the plan of `t` in the plan window and go there, in Normal mode. The
+-- window stays the same for every plan and revision (in whatever tab the user
+-- is); when it is gone, or no longer shows a plan, one is picked in the
+-- current tab again.
 local function go_to(t)
-  local win = windows_of(t)[1]
-  if win then
-    vim.api.nvim_set_current_win(win)
-  else
-    open_tab(t)
+  local buf = plan_buffer(t)
+  local from = vim.api.nvim_get_current_win()
+  leave_modes()
+  local reused = false
+  if place and vim.api.nvim_win_is_valid(place.win) and plan_of_buf(vim.api.nvim_win_get_buf(place.win)) then
+    reused = vim.api.nvim_win_get_buf(place.win) == buf or pcall(put_buf, place.win, buf)
+    if reused and place.win ~= from then
+      place.from = from
+    end
+  end
+  if not reused then
+    local win = pick_window()
+    local found
+    if win then
+      found = {
+        win = win, buf = vim.api.nvim_win_get_buf(win), split = false,
+        view = vim.api.nvim_win_call(win, vim.fn.winsaveview),
+      }
+      -- A buffer with unsaved changes may not be left: make a window instead.
+      if not pcall(put_buf, win, buf) then
+        found = nil
+      end
+    end
+    found = found or { win = open_split(buf), split = true }
+    found.from = from
+    place = found
+  end
+  vim.api.nvim_set_current_win(place.win)
+  set_winbar(t)
+  ui.redraw_threads()
+end
+
+-- A window the review is done with and that shows no plan any more (the
+-- buffer is deleted next): the buffer it had before the plan, in the same
+-- place; if that is gone, another listed buffer, else an empty one.
+local function give_back(win, p)
+  if p.split and #vim.tbl_filter(function(w)
+    return not is_float(w)
+  end, vim.api.nvim_tabpage_list_wins(vim.api.nvim_win_get_tabpage(win))) > 1 then
+    return vim.api.nvim_win_close(win, true)
+  end
+  if p.buf and vim.api.nvim_buf_is_valid(p.buf) and not plan_of_buf(p.buf) and pcall(put_buf, win, p.buf) then
+    if p.view then
+      pcall(vim.api.nvim_win_call, win, function()
+        vim.fn.winrestview(p.view)
+      end)
+    end
+    return
+  end
+  local infos = vim.fn.getbufinfo({ buflisted = 1 })
+  table.sort(infos, function(a, b)
+    return a.lastused > b.lastused
+  end)
+  for _, info in ipairs(infos) do
+    if vim.bo[info.bufnr].buftype == '' and not plan_of_buf(info.bufnr) and pcall(put_buf, win, info.bufnr) then
+      return
+    end
+  end
+  vim.api.nvim_win_call(win, function()
+    vim.cmd('keepalt enew')
+  end)
+end
+
+-- The user is back where they came from; a terminal is typed into at once.
+local function go_back(p)
+  if p.from and vim.api.nvim_win_is_valid(p.from) then
+    vim.api.nvim_set_current_win(p.from)
+    if vim.bo[vim.api.nvim_win_get_buf(p.from)].buftype == 'terminal' then
+      vim.cmd('startinsert')
+    end
   end
 end
 
@@ -261,7 +428,10 @@ local function revise(t, lines)
   -- Feedback the hook has not taken yet is still on its way.
   t.plan_state = t.plan_result and 'feedback-sent' or 'pending'
   -- The user waits for the revision: show it.
-  go_to(t)
+  local shown, err = pcall(go_to, t)
+  if not shown then
+    notify('the revised plan could not be shown: ' .. tour.clean_error(err) .. '; :Walkthrough plan shows it', vim.log.levels.WARN)
+  end
   set_winbar(t)
   store.save(t.root)
   ui.update()
@@ -269,8 +439,8 @@ local function revise(t, lines)
 end
 
 --- Socket entry point of the hook. `path` is a file with the hook input
---- (JSON: `tool_input.plan`, `session_id`). Opens the plan in a tab of its
---- own, or, when the same session has a review under way, puts the new text
+--- (JSON: `tool_input.plan`, `session_id`). Opens the plan in a window of the
+--- current tab, next to the agent's terminal, or, when the same session has a review under way, puts the new text
 --- in it. Returns the review id, or "error: ...". Never raises.
 function M.open(path)
   local ok, res = pcall(function()
@@ -318,14 +488,17 @@ function M.open(path)
     }
     -- Not the active tour: the plan is in no map and no review.
     table.insert(st.tours, t)
-    local opened, open_err = pcall(open_tab, t)
+    local opened, open_err = pcall(go_to, t)
     if not opened then
       tours.remove(t)
+      if #tours.plans() == 0 then
+        place = nil
+      end
       vim.fn.delete(file)
       error(open_err, 0)
     end
     store.save(t.root)
-    notify('a plan is waiting for review: annotate it, then A approves and F sends feedback')
+    notify('a plan is waiting for review: write comments on its lines, then A approves and F sends them')
     return id
   end)
   return ok and res or ('error: ' .. tour.clean_error(res))
@@ -385,8 +558,6 @@ end
 
 -- User: feedback -----------------------------------------------------------------------
 
-local kind_label = { question = 'Question', change = 'Change request' }
-
 local function id_number(id)
   return tonumber(tostring(id):match('^t(%d+)$')) or 0
 end
@@ -419,18 +590,18 @@ local function squash(text)
   return (tour.text_of(text):gsub('%s*\n%s*', ' / '))
 end
 
---- The message for the agent: every thread in `threads`, numbered, with its
---- kind, the plan lines it is about (at most 5 quoted), and what the user
+--- The message for the agent: every comment in `threads`, numbered, with its
+--- thread, the plan lines it is about (at most 5 quoted), and what the user
 --- wrote. Ends with what is expected.
 function M.build_message(t, threads)
   local plan_lines = vim.fn.readfile(t.steps[1].file)
   local lines = {
-    ('Walkthrough: feedback from the user on your plan (%d item%s).'):format(#threads, #threads == 1 and '' or 's'),
+    ('Walkthrough: feedback from the user on your plan (%d comment%s).'):format(#threads, #threads == 1 and '' or 's'),
   }
   for i, th in ipairs(threads) do
     table.insert(lines, '')
-    table.insert(lines, ('%d. %s %s on plan %s %s:'):format(
-      i, kind_label[th.kind], th.id, th.to > th.from and 'lines' or 'line',
+    table.insert(lines, ('%d. Comment %s on plan %s %s:'):format(
+      i, th.id, th.to > th.from and 'lines' or 'line',
       th.to > th.from and ('%d-%d'):format(th.from, th.to) or tostring(th.from)))
     for line = th.from, math.min(th.to, th.from + QUOTE_LINES - 1) do
       table.insert(lines, '   > ' .. cap(plan_lines[line] or '', QUOTE_WIDTH))
@@ -457,8 +628,9 @@ function M.build_message(t, threads)
     end
   end
   table.insert(lines, '')
-  table.insert(lines, 'Answer each question and revise the plan for each change request, replying to every item'
-    .. ' with a patch { "thread": "<id>", "answer": "..." } (tour.sh --patch) before presenting the plan again.')
+  table.insert(lines, 'Reply to every comment with a patch { "thread": "<id>", "answer": "..." } (tour.sh --patch),'
+    .. ' and revise the plan where a comment asks for a change or shows that one is needed,'
+    .. ' before presenting the plan again.')
   return table.concat(lines, '\n')
 end
 
@@ -471,9 +643,9 @@ local function queue(t, message, marks)
   ui.update()
 end
 
---- Send the annotations of the plan back to the agent: one message with all
+--- Send the comments on the plan back to the agent: one message with all
 --- that was not delivered yet. Without any, ask what should change and send
---- that. The tab stays open. `id` names the review (default: the one of the
+--- that. The plan stays on screen. `id` names the review (default: the one of the
 --- current buffer, else the only one).
 function M.feedback(id)
   local t = target(id)
@@ -506,13 +678,14 @@ function M.feedback(id)
     table.insert(marks, { id = th.id, count = #th.messages })
   end
   queue(t, M.build_message(t, threads), marks)
-  notify(('feedback sent (%d item%s); waiting for the revised plan'):format(#threads, #threads == 1 and '' or 's'))
+  notify(('feedback sent (%d comment%s); waiting for the revised plan'):format(#threads, #threads == 1 and '' or 's'))
 end
 
 -- User: approve -------------------------------------------------------------------------
 
---- Let the plan through: the hook gets `approve`, the tab closes, the plan
---- and its file are deleted. Annotations still open are dropped, and the
+--- Let the plan through: the hook gets `approve`, the plan and its file are
+--- deleted, and the window shows again what it showed before (a window made
+--- for the plan is closed). Comments still open are dropped, and the
 --- notification says how many. `id` as in `feedback`.
 function M.approve(id)
   local t = target(id)
@@ -520,39 +693,62 @@ function M.approve(id)
   local buf = buffer_of(t)
   remember(t.plan_id, { state = 'approve' })
   tours.remove(t)
+  local rest = tours.plans()
 
-  -- Close the tab (or the windows of the plan in it); a last window stays
-  -- and shows an empty buffer.
   for _, win in ipairs(buf and vim.fn.win_findbuf(buf) or {}) do
     if vim.api.nvim_win_is_valid(win) then
-      local tab = vim.api.nvim_win_get_tabpage(win)
-      if #vim.api.nvim_list_tabpages() > 1 or #vim.api.nvim_tabpage_list_wins(tab) > 1 then
-        pcall(vim.api.nvim_win_close, win, true)
+      if place and win == place.win then
+        -- Another plan that waits takes the window; else it gets its place back.
+        local ok = false
+        if #rest > 0 then
+          ok = pcall(function()
+            put_buf(win, plan_buffer(rest[#rest]))
+            set_winbar(rest[#rest])
+          end)
+        end
+        if not ok then
+          local given = pcall(give_back, win, place)
+          if not given and vim.api.nvim_win_is_valid(win) and #vim.api.nvim_list_wins() > 1 then
+            pcall(vim.api.nvim_win_close, win, true)
+          end
+        end
       else
-        pcall(vim.api.nvim_win_call, win, function()
-          vim.cmd('enew')
-        end)
+        -- Another window of the plan: closed, a last one stays and shows an
+        -- empty buffer.
+        local tab = vim.api.nvim_win_get_tabpage(win)
+        if #vim.api.nvim_list_tabpages() > 1 or #vim.api.nvim_tabpage_list_wins(tab) > 1 then
+          pcall(vim.api.nvim_win_close, win, true)
+        else
+          pcall(vim.api.nvim_win_call, win, function()
+            vim.cmd('enew')
+          end)
+        end
       end
     end
   end
   if buf and vim.api.nvim_buf_is_valid(buf) then
     pcall(vim.api.nvim_buf_delete, buf, { force = true })
   end
-  if t.plan_from and vim.api.nvim_tabpage_is_valid(t.plan_from) then
-    pcall(vim.api.nvim_set_current_tabpage, t.plan_from)
+  if #rest == 0 then
+    local p = place
+    place = nil
+    if p then
+      pcall(go_back, p)
+    end
   end
   vim.fn.delete(t.steps[1].file)
   store.save(t.root)
   ui.update()
   notify('plan approved' .. (dropped > 0
-    and ('; dropped %d annotation%s that %s still open'):format(dropped, dropped == 1 and '' or 's', dropped == 1 and 'was' or 'were')
+    and ('; dropped %d comment%s that %s still open'):format(dropped, dropped == 1 and '' or 's', dropped == 1 and 'was' or 'were')
     or ''))
 end
 
 -- User: go to the plan ------------------------------------------------------------------
 
---- `:Walkthrough plan` without an argument: the tab of the plan that waits for
---- a decision, opened again when it was closed. With several, the newest.
+--- `:Walkthrough plan` without an argument: the plan that waits for a decision,
+--- in the plan window (shown again when it was closed or left). With several,
+--- the newest.
 function M.show()
   restore()
   local all = tours.plans()

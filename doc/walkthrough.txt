@@ -1,4 +1,4 @@
-*walkthrough.txt*  Annotate a plan, a change or any code; the agent answers
+*walkthrough.txt*  Comment on a plan, a change or any code; the agent answers
 
 ==============================================================================
 CONTENTS                                                         *walkthrough*
@@ -39,9 +39,10 @@ command, option, key, mapping and public function.
 ==============================================================================
 1. CONCEPTS                                             *walkthrough-concepts*
 
-walkthrough.nvim lets you annotate an agent's plan, its change, or any code
-inside Neovim. The agent session you work with (the "working session") answers
-and proposes next to the line you wrote on. Approved work becomes small
+walkthrough.nvim lets you write on the lines of an agent's plan, its change, or
+any code inside Neovim: comments on a plan, questions and change requests on
+code. The agent session you work with (the "working session") answers and
+proposes next to the line you wrote on. Approved work becomes small
 commits that stand on their own.
 
 map          The ordered list of commits of a change. Each commit lists its
@@ -54,9 +55,10 @@ commit       In the map: a coherent set of lines, maybe from several files and
              is a `group` (|walkthrough-format|).
 entry        One file of a commit, with its sentence (`title`). In the
              protocol it is a `step`.
-thread       Something written on lines, with the replies under it. There are
-             two kinds, both yours: a question (`question`) and a change
-             request (`change`). See |walkthrough-threads|.
+thread       Something written on lines, with the replies under it. On code
+             there are two kinds, both yours: a question (`question`) and a
+             change request (`change`). On a plan there is one: a comment
+             (`comment`). See |walkthrough-threads|.
 finding      A remark of the agent on a line, with a verdict (keep, simplify,
              remove, moved) and how it knows (ran, read, opinion). In the
              protocol it is a note. See |walkthrough-findings|.
@@ -115,7 +117,7 @@ A. Review a finished change                           *walkthrough-scenario-a*
      `P[` between commits, `Pv` jumps to the same line in the real file and
      back. Lines of other commits are dimmed and labelled with their commit.
      Lines in no commit are flagged.
-  4. Annotate, in either view. `Pa` asks a question: it is sent at once and the
+  4. Write on lines, in either view. `Pa` asks a question: it is sent at once and the
      answer appears under the line. `Pc` writes a change request: it is
      collected, `Pm` sends all of them, and the agent replies to each with a
      proposal. `Py` accepts a proposal or finding, `Pd` declines it: the
@@ -142,13 +144,14 @@ with `Pq` (|walkthrough-other|).
 C. Plan review                                        *walkthrough-scenario-c*
 
 When the agent leaves plan mode, a hook hands the plan to Neovim and the agent
-waits. The plan opens as a document in a tab of its own. You write questions
-and change requests on its lines (`Pa`, `Pc`; both are collected, because the
-agent is waiting). Then `A` approves the plan, or `F` sends your annotations
-back as feedback. The agent revises the plan and shows it again in the same
-tab, with its replies under your lines. Without a reachable Neovim the normal
-prompt of the agent appears. Claude Code is supported first; the hook is the
-only part specific to it (|walkthrough-plan|).
+waits. The plan opens as a document in a window of the current tab, next to
+the agent's terminal. You write comments on its lines (`Pa` or `Pc`: both
+write the same comment, and comments are collected, because the agent is
+waiting). Then `A` approves the plan, or `F` sends your comments back as
+feedback. The agent revises the plan and shows it again in the same window,
+with its replies under your lines. Without a reachable Neovim the normal
+prompt of the agent appears. Claude Code is supported first; the hook is the only part specific to
+it (|walkthrough-plan|).
 
 ==============================================================================
 3. SETUP OPTIONS                                           *walkthrough-setup*
@@ -189,7 +192,8 @@ module again.
                      is typed or pasted but not submitted, and the focus moves
                      to the agent. See |walkthrough-senders|.
   `input`            "float" (default) or "ui": where the text of a question, a
-                     change request, a reply and plan feedback is typed. "float"
+                     change request, a comment, a reply and plan feedback is
+                     typed. "float"
                      opens a centered window (|walkthrough-input|). "ui" calls
                      `vim.ui.input`, for those who have their own input UI.
   `terminal_pattern` Which terminal buffer is the agent, for the "terminal"
@@ -262,13 +266,18 @@ Write
                               sent along. Without text it asks for it
                               (|walkthrough-input|). If nothing can be sent,
                               the thread stays a draft and goes out with
-                              `send`.
+                              `send`. In a plan it does the same as
+                              `:Walkthrough change`: it writes a comment, or
+                              replies in the comment on those lines, and
+                              nothing is sent until plan feedback
+                              (|walkthrough-plan|).
   `:Walkthrough change [text]`
                               the same for a change request: the thread is
                               collected, nothing is sent until `send`. The
                               agent answers with a proposal. On lines that
                               carry a question thread, that thread becomes a
-                              change request.
+                              change request. In a plan it does the same as
+                              `:Walkthrough ask`: a comment (see above).
   `:Walkthrough send`         send everything not delivered yet, in all
                               commits of the repository, as one message:
                               change requests, collected replies and your
@@ -317,14 +326,16 @@ Approve
                               (|walkthrough-commit|).
 
 Plan (|walkthrough-plan|)
-  `:Walkthrough plan`         go to the tab of the plan that waits for your
-                              decision, and open it again when you closed it.
-                              With none it says so.
-  `:Walkthrough plan approve` let the plan through: the agent goes on, the tab
-                              closes, the plan is deleted. Annotations still
-                              open are dropped (the notification counts them).
+  `:Walkthrough plan`         go to the plan that waits for your decision,
+                              and show it again when you closed the window or
+                              showed another buffer in it. With none it says
+                              so.
+  `:Walkthrough plan approve` let the plan through: the agent goes on, the
+                              window shows its old buffer again, the plan is
+                              deleted. Comments still open are dropped (the
+                              notification counts them).
   `:Walkthrough plan feedback`
-                              send your annotations of the plan back to the
+                              send your comments on the plan back to the
                               agent in one message. With none it asks what
                               should change and sends that.
 
@@ -366,6 +377,7 @@ visual mode, where they cover the selected lines):
   <Plug>(walkthrough-back)               back to the current entry
   <Plug>(walkthrough-ask)                ask a question here (sent at once)
   <Plug>(walkthrough-change)             write a change request here
+                                         (in a plan, both write a comment)
   <Plug>(walkthrough-send)               send change requests and decisions
   <Plug>(walkthrough-thread)             open the thread or finding in full
   <Plug>(walkthrough-link)               open a link of the thread or finding
@@ -416,6 +428,7 @@ Move
 Write
   Pa          ask a question (normal and visual mode)
   Pc          write a change request (normal and visual mode)
+              (In a plan, `Pa` and `Pc` both write a comment.)
   Pm          send
   Pt          open the thread here in full
   Po          open a link of the thread or finding here
@@ -462,16 +475,17 @@ keys are free):
 *walkthrough-thread*
 `:Walkthrough thread` (`Pt`) opens the thread or finding on the cursor line in
 a centered float, as plain text: a heading (`t1 · question · path:10-12 ·
-state`; for a decision that is not sent: `(accepted, not sent)` or `(declined,
-not sent)` in place of the state), the code lines (12 at most), then every message with `You:` or
+state`; on a plan the kind is `comment`; for a decision that is not sent:
+`(accepted, not sent)` or `(declined, not sent)` in place of the state), the
+code lines (12 at most), then every message with `You:` or
 `Agent:` (a proposal is marked `Agent (proposal):`). For a finding: its number,
 verdict, evidence, decision (with `(not sent)` while it is not), text and
 `detail`. The float draws itself again
 when its thread changes while it is open. Its keys:
 
   r         reply (asks for the text; a question is sent at once, a change
-            request is collected). In a thread with a proposal it asks for
-            another one; in a declined or done thread it continues the thread.
+            request or a comment on a plan is collected). In a thread with a
+            proposal it asks for another one; in a declined or done thread it continues the thread.
   y  d      accept / decline the proposal or finding (marked, not sent)
   u         take the decision back (while it is not sent)
   o         open a link of the thread or finding (`:Walkthrough link`). URLs
@@ -589,20 +603,30 @@ buffer is modified (in the compact view: while any file of the commit is).
 A thread is written on lines of a saved file, in either view, in any window.
 It has an id (`t1`, `t2`, ...), unique in the repository and never reused.
 
-Kinds:
+Kinds, on code:
   `question`   yours. Sent the moment you write it. The agent answers without
                changing code.
   `change`     your change request. Collected while you read; `send` delivers
                all of them. The agent replies with a proposal.
+Kind, on a plan (|walkthrough-plan|):
+  `comment`    yours. Collected while you read; plan feedback delivers all of
+               them. `Pa` and `Pc` both write it. The agent replies to it,
+               and revises the plan where it asks for a change.
+
+The kind `comment` exists only in a plan; code has no thread of that kind. A
+thread of a plan that was saved as a `question` or a `change` (before a plan
+had one kind) loads as a `comment`, with all its messages.
 
 Writing again on lines that carry a thread of yours adds your message to that
 thread, whichever key you use (`Pa`, `Pc`, or `r` in the thread float):
 
-  - A change request (`Pc`) written in a question thread makes the thread a
-    change request: the input is titled `Change request in t1`, the message is
-    collected, and after `send` the agent replies with a proposal. The
-    question and its answer stay in the thread. A question (`Pa`) written in a
-    change request stays a reply in it.
+  - On code, a change request (`Pc`) written in a question thread makes the
+    thread a change request: the input is titled `Change request in t1`, the
+    message is collected, and after `send` the agent replies with a proposal.
+    The question and its answer stay in the thread. A question (`Pa`) written
+    in a change request stays a reply in it. On a plan there is one kind: the
+    text is a reply in the comment, titled `Reply in t1`, and the thread stays
+    a `comment`.
   - In a thread with a proposal it asks for another proposal. A decision you
     marked on it and did not send is cleared. `send` tells the agent to revise
     its proposal: to reply with a new proposal (`answer` with `proposal`) and
@@ -614,8 +638,9 @@ thread, whichever key you use (`Pa`, `Pc`, or `r` in the thread float):
     threads on the lines, the newest is continued; an open one comes first.
 
 States, and the label drawn after the id:
-  `draft`      written, not delivered: a change request waiting for `send`, or
-               a question that could not be sent. Label "(not sent)".
+  `draft`      written, not delivered: a change request waiting for `send`, a
+               comment waiting for plan feedback, or a question that could not
+               be sent. Label "(not sent)".
   `waiting`    delivered, no answer yet. Label "(waiting)".
   `answered`   the agent answered. No label.
   `proposed`   the agent answered with a proposal. Label "(proposal)". A new
@@ -647,10 +672,11 @@ code on those lines was rewritten after the thread was started.
 of a change are deleted after its commit.
 
 *walkthrough-input*
-The text of a question, a change request, a reply and plan feedback is typed
-in a small floating window in the middle of the screen, not on the command
-line. The title says what is written and where: `Question on backup.sh:7`,
-`Change request on backup.sh:7-9`, `Reply in t2`, `Plan feedback`. The footer
+The text of a question, a change request, a comment, a reply and plan feedback
+is typed in a small floating window in the middle of the screen, not on the
+command line. The title says what is written and where: `Question on
+backup.sh:7`, `Change request on backup.sh:7-9`, `Comment on plan line 4`,
+`Comment on plan lines 4-6`, `Reply in t2`, `Plan feedback`. The footer
 names the keys. The window has a scratch buffer of the file type
 `walkthrough_input` (so completion plugins can be switched off for it), and it
 opens in Insert mode.
@@ -851,7 +877,8 @@ executable script that exits non-zero on failure, and stage it:
 13. PLAN REVIEW                                             *walkthrough-plan*
 
 The agent proposes a plan before it edits, and waits for you. This opens the
-plan in Neovim, where you annotate it and then approve it or send it back.
+plan in Neovim, where you write comments on its lines and then approve it or
+send it back.
 Claude Code is supported first; the hook is the only part specific to it.
 
 How it works: Claude Code runs a `PermissionRequest` hook for `ExitPlanMode`
@@ -875,44 +902,68 @@ waits for you):
     } ] } ] } }
 <
 
-The plan opens in a new tab as a read-only markdown file,
-`<state_dir>/plans/<id>.md`, where the id is the session id and a counter.
-Other tabs and their windows are not touched. A notification says that a plan
-waits, and the tab's winbar names the keys. In that buffer:
+The plan opens as a read-only markdown file, `<state_dir>/plans/<id>.md`,
+where the id is the session id and a counter. It opens in the current tab; no
+tab is made. The agent's terminal stays on screen; it is never replaced,
+closed or resized on purpose. The plan takes a window that holds
+code: the code window of a review when it fits, else the window of the tab
+used last that fits. A terminal, the map panel, a floating window and a window
+with 'winfixbuf' do not fit. When no window fits (only the terminal is on
+screen), the plan gets a new vertical split beside the terminal. The focus
+goes to the plan window, in Normal mode, also when you were typing in the
+terminal. A notification says that a plan waits, and the window's winbar names
+the keys (`A`, `F`, and the key that writes a comment: your mapping of `ask`,
+else of `change`, else the command). In that buffer:
 
   A                 approve (`:Walkthrough plan approve`)
   F                 send feedback (`:Walkthrough plan feedback`)
-  `ask`, `change`   annotate lines as everywhere (|walkthrough-mappings|).
-                    Here both kinds are collected, because the agent is
-                    waiting in its hook. `send` is refused there and points to
-                    feedback. `decide` and `explain` do nothing in a plan.
+  `ask`, `change`   write a comment on the cursor line or the selected lines
+                    (|walkthrough-mappings|). In a plan the two do the same:
+                    a comment is the only kind of thread, and it is collected,
+                    because the agent is waiting in its hook. The input is
+                    titled `Comment on plan line 4` or `Comment on plan lines
+                    4-6`. On lines that carry a comment, the text is a reply
+                    in it (`Reply in t1`). Nothing is sent until you press
+                    `F`. `send` is refused there and points to feedback.
+                    `decide` and `explain` do nothing in a plan.
 
 The default keys `PA` and `PF` do the same from any buffer when one plan waits.
 
-Feedback is one message: every annotation not delivered yet, numbered, with
-its kind (question or change request), the plan lines it is about (quoted, at
-most 5), and your text. It ends with what the agent should do: answer each
-question, revise the plan for each change request, and reply to every item
-with a patch `{ "thread": "<id>", "answer": "..." }` (|walkthrough-patch|)
-before it presents the plan again. With no annotation, it asks "What should
-change?" and sends your answer; an empty answer cancels. The tab stays open and
-its winbar says "feedback sent; waiting for the revised plan". The agent's
-replies are drawn under your lines like any answer.
+Feedback is one message: every comment not delivered yet, numbered and labelled
+`Comment t1 on plan line 4:` (or `lines 4-6`), with the plan lines it is about
+(quoted, at most 5) and your text. It ends with what the agent should do: reply
+to every comment with a patch `{ "thread": "<id>", "answer": "..." }`
+(|walkthrough-patch|), and revise the plan where a comment asks for a change or
+shows that one is needed, before it presents the plan again. With no comment,
+it asks "What should change?" and sends your answer; an empty answer cancels.
+The plan stays on screen and its winbar says "feedback sent; waiting for the
+revised plan". The agent's replies are drawn under your lines like any answer.
 
 When the agent presents the revised plan, the hook calls `plan()` again for
-the same session: the new text replaces the old one in the same tab (opened
+the same session: the new text replaces the old one in the same window (shown
 again when you closed it), and your threads stay and follow their lines.
 Threads on lines that were rewritten are stale, as for code
-(|walkthrough-stale|). Approving closes the tab and deletes the plan, its
-file and its saved state; annotations still open are dropped and the
-notification says how many.
+(|walkthrough-stale|). Approving deletes the plan, its file and its saved
+state; comments still open are dropped and the notification says how many.
+
+The window gets its old buffer back, with its cursor and view. A split made
+for the plan is closed instead. If the old buffer is gone, the window shows
+another listed buffer, or an empty one. The focus goes back to the window you
+came from; in a terminal, Terminal mode starts again. A review under way (map
+panel, compact view or file view) is back as it was.
+
+Several plans share that one window; the newest is shown. What comes back at
+the end is what was there before the first plan. If you close the window, or
+show another buffer in it, the plan stays pending; `:Walkthrough plan` shows
+it again by the same rule.
 
 A plan is a commit flagged `plan` with one entry, the plan file, and nothing
 else sees it: it is in no map, and `review`, `stage`, `commit`, `send` and
 `inbox` ignore it. `close()` leaves it (it does not approve or deny). It is
-saved with the review state, so a restart keeps your threads: the next plan of
+saved with the review state, so a restart keeps your comments: the next plan of
 the same session continues the saved review, and `:Walkthrough plan` brings it
-back. See `status()` (|walkthrough-status|) for `plan`.
+back. A saved plan whose threads are `question` or `change` (written before a
+plan had one kind) comes back with `comment` threads and all their messages. See `status()` (|walkthrough-status|) for `plan`.
 
 ==============================================================================
 14. EXISTING CODE, RESTORE, CLOSE                          *walkthrough-other*
@@ -1386,9 +1437,9 @@ return "ok", a JSON string, a commit id, or "error: <one short line>".
   close()             end the session: clear everything, close the panel,
                       forget the commits, delete `Other files` from the saved
                       state. A plan under review stays (|walkthrough-plan|).
-  plan({path})        open the plan of a hook input file in a tab of its own,
-                      or put a revised plan in the tab of its session. Returns
-                      the review id (|walkthrough-plan|).
+  plan({path})        open the plan of a hook input file in a window of the
+                      current tab, or put a revised plan in the window of its
+                      session. Returns the review id (|walkthrough-plan|).
   plan_result({id})   JSON: `{"state":"pending"}`, `{"state":"approve"}` or
                       `{"state":"feedback","message":"..."}` for the review
                       {id}. Feedback is handed out once.
@@ -1411,10 +1462,12 @@ notification (|vim.notify()|).
                       or show it
   ask({text}, {range})
                       ask a question, sent at once; {range} is `{ from, to }`.
-                      Without {text} it is typed in the input window
+                      Without {text} it is typed in the input window. In a
+                      plan it writes a comment, as change() does
   ask_line()          the old name of ask()
   change({text}, {range})
-                      write a change request, collected until send()
+                      write a change request, collected until send(). In a
+                      plan it writes a comment, as ask() does
   thread()            the thread or finding here in full, in a float
   link()              open a link of the thread or finding here
   thread_delete()     delete the thread here
@@ -1430,8 +1483,8 @@ notification (|vim.notify()|).
   commit_ask()        ask the agent for a message for the open commit dialog
   base()              the base version in a float
   keys()              the key cheat sheet in a float
-  plan_show()         go to the tab of the plan under review
-  plan_feedback()     send the annotations of the plan back to the agent
+  plan_show()         go to the plan under review, in the plan window
+  plan_feedback()     send your comments on the plan back to the agent
   plan_approve()      approve the plan
 
 Helpers for mappings and other plugins:

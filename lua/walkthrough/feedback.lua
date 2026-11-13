@@ -6,7 +6,9 @@
 -- (anchor.lua).
 --
 -- A question is sent at once. A change request is collected until `send`,
--- because the user usually writes several. A decision on a proposal or a
+-- because the user usually writes several. In a plan review (plan.lua) there
+-- is one kind of thread, a comment: `ask` and `change` both write it, and it
+-- is collected until the plan feedback. A decision on a proposal or a
 -- finding is collected too: it can be changed or taken back until `send`
 -- delivers it, together with the change requests and the replies. What could
 -- not be delivered stays in the thread and goes out with the next `send`.
@@ -65,6 +67,11 @@ local function where(from, to)
   return to > from and ('%d-%d'):format(from, to) or tostring(from)
 end
 
+-- `line 4` or `lines 4-6`.
+local function where_words(from, to)
+  return (to > from and 'lines ' or 'line ') .. where(from, to)
+end
+
 -- The file of the current buffer, if it is one a thread can be about: a
 -- normal buffer with a name. Nil otherwise.
 local function file_of(buf)
@@ -95,9 +102,9 @@ local function scope()
   return tours.scope()
 end
 
--- The plan review (plan.lua) the current buffer shows, else nil. In a plan
--- both kinds of thread are collected, because the agent is waiting in a
--- hook; what goes out is `plan feedback`, not `send`.
+-- The plan review (plan.lua) the current buffer shows, else nil. A plan has
+-- comments only, collected because the agent is waiting in a hook; what goes
+-- out is `plan feedback`, not `send`.
 local function plan_here()
   local file = file_of(vim.api.nvim_get_current_buf())
   local e = file and tours.entries(file)[1]
@@ -581,8 +588,9 @@ end
 -- Writing ---------------------------------------------------------------------------
 
 --- Add `text` as a message of the user to `th` (of `step`, in tour `t`). A
---- question is sent at once, a change request is collected until `send`.
---- Returns whether it went out. Writing in a thread
+--- question is sent at once, a change request is collected until `send`, a
+--- comment in a plan until the plan feedback. Returns whether it went out.
+--- Writing in a thread
 --- - that has a proposal asks for another one: a decision marked and not sent
 ---   is cleared (one that was sent stands: the agent is applying it);
 --- - that is closed (declined or done) continues it: it is open again, and
@@ -590,13 +598,13 @@ end
 --- `kind` is what the user wrote, when the key says so: a change request
 --- ('change') in a question thread makes the thread a change request, so the
 --- agent proposes instead of answering. A question in a change request stays
---- a reply in it.
+--- a reply in it. In a plan there is one kind: `kind` is ignored.
 function M.reply(t, step, th, text, kind)
   text = vim.trim(text or '')
   if text == '' then
     return false
   end
-  local became_change = kind == 'change' and th.kind == 'question'
+  local became_change = kind == 'change' and th.kind == 'question' and not t.plan
   if became_change then
     th.kind = 'change'
   end
@@ -614,8 +622,12 @@ function M.reply(t, step, th, text, kind)
     return deliver_now({ thread_item(t, step_index(t, step), step, th) }, 'question ' .. th.id)
   end
   changed(t.root)
-  notify((became_change and '%s is a change request now; %s delivers it' or 'reply added to %s; %s delivers it')
-    :format(th.id, t.plan and 'plan feedback' or 'send'))
+  if t.plan then
+    notify(('reply added to %s; F sends it'):format(th.id))
+    return false
+  end
+  notify((became_change and '%s is a change request now; send delivers it' or 'reply added to %s; send delivers it')
+    :format(th.id))
   return false
 end
 
@@ -722,31 +734,40 @@ local function write(kind, text, range)
     e = e or entries[1] or tours.extra_entry(root, file)
     local t, step = e.t, e.step
     step.threads = step.threads or {}
+    -- In a plan there is one kind of thread, whichever key was used.
+    local th_kind = t.plan and 'comment' or kind
     local th = {
-      id = tours.new_thread_id(t), kind = kind, from = from, to = to,
+      id = tours.new_thread_id(t), kind = th_kind, from = from, to = to,
       messages = { { by = 'user', text = answer } }, state = 'draft', sent = 0,
     }
     table.insert(step.threads, th)
     -- A question is sent at once, except in a plan: the agent is waiting in
-    -- its hook and gets everything together, with `plan feedback`.
-    if kind == 'question' and not t.plan then
+    -- its hook and gets everything together, with the plan feedback.
+    if th_kind == 'question' then
       return deliver_now({ thread_item(t, e.si, step, th) }, 'question ' .. th.id)
     end
     changed(t.root)
-    notify(('%s %s added (line %s); %s delivers it'):format(
-      kind == 'question' and 'question' or 'change request', th.id, where(from, to),
-      t.plan and 'plan feedback' or 'send'))
+    if t.plan then
+      notify(('comment %s added (%s); F sends it'):format(th.id, where_words(from, to)))
+    else
+      notify(('change request %s added (line %s); send delivers it'):format(th.id, where(from, to)))
+    end
   end
 
   if text and vim.trim(text) ~= '' then
     return add(text)
   end
-  local _, open = thread_for(tours.entries(file), from, to)
+  local entries = tours.entries(file)
+  local _, open = thread_for(entries, from, to)
   local title, prompt
   if open then
-    -- A change request written in a question thread is what the thread becomes.
+    -- A change request written in a question thread is what the thread becomes
+    -- (not in a plan: there is one kind).
     title = ((kind == 'change' and open.kind == 'question') and 'Change request in %s' or 'Reply in %s'):format(open.id)
     prompt = ('%s on line %s: '):format(title, where(from, to))
+  elseif entries[1] and entries[1].t.plan then
+    title = ('Comment on plan %s'):format(where_words(from, to))
+    prompt = title .. ': '
   else
     local what = kind == 'question' and 'Question' or 'Change request'
     title = ('%s on %s:%s'):format(what, vim.fn.fnamemodify(file, ':~:.'), where(from, to))
@@ -757,14 +778,16 @@ end
 
 --- Ask a question about the code: on `range` ({ from, to }), the selection
 --- or the cursor line. It is sent at once. If the lines carry a thread of the
---- user, the text is a reply in it, whatever its kind (see M.reply).
+--- user, the text is a reply in it, whatever its kind (see M.reply). In a plan
+--- it writes a comment, as `change` does.
 function M.ask(text, range)
   return write('question', text, range)
 end
 
 --- Request a change of the code on those lines. It is collected: `send`
 --- delivers it, and the agent answers with a proposal. On lines that carry a
---- question thread, the thread becomes a change request (see M.reply).
+--- question thread, the thread becomes a change request (see M.reply). In a
+--- plan it writes a comment, as `ask` does.
 function M.change(text, range)
   return write('change', text, range)
 end

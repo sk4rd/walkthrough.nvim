@@ -382,6 +382,26 @@ do
   w.plan_feedback()
   cancel_prompt()
   check('plan feedback: cancelling sends nothing more', find('no feedback sent') ~= nil)
+  -- A comment on the plan: the same title with either key, a range says so.
+  vim.api.nvim_win_set_cursor(0, { 2, 0 })
+  w.ask()
+  check('plan: ask is titled as a comment on the plan line', input.win() and title_of(input.win()) == ' Comment on plan line 2 ',
+    input.win() and title_of(input.win()))
+  cancel_prompt()
+  w.change(nil, { 3, 5 })
+  check('plan: change is titled the same, with lines', input.win() and title_of(input.win()) == ' Comment on plan lines 3-5 ',
+    input.win() and title_of(input.win()))
+  type_in('a comment<CR>')
+  local plan_tour = require('walkthrough.tours').plans()[1]
+  local c1 = plan_tour.steps[1].threads and plan_tour.steps[1].threads[1]
+  check('plan: the typed text is a comment on those lines', c1 and c1.kind == 'comment' and c1.from == 3 and c1.to == 5
+    and c1.messages[1].text == 'a comment', vim.inspect(plan_tour.steps[1].threads))
+  vim.api.nvim_win_set_cursor(0, { 4, 0 })
+  w.ask()
+  check('plan: the title on a line with a comment is a reply', input.win() and title_of(input.win()) == ' Reply in t1 ',
+    input.win() and title_of(input.win()))
+  cancel_prompt()
+  w.thread_delete()
   pcall(w.plan_approve, id)
   w.close()
   vim.cmd('silent! tabonly')
