@@ -31,6 +31,16 @@ local function status()
   vim.notify(line, vim.log.levels.INFO)
 end
 
+-- Record the working tree as refs/walkthrough/<name> (default "reviewed").
+local function reviewed(name)
+  local id = wt().snapshot(name)
+  if id:match('^error: ') then
+    return report(id)
+  end
+  vim.notify(('walkthrough: recorded refs/walkthrough/%s at %s'):format(name or 'reviewed', id:sub(1, 7)),
+    vim.log.levels.INFO)
+end
+
 local comment_types = { 'question', 'issue', 'suggestion' }
 
 -- name -> function(arg, opts) ; `arg` is the rest of the command line and
@@ -88,15 +98,8 @@ local subcommands = {
   base = function() wt().base() end,
   back = function() wt().step(0) end,
   -- reviewed [name]: record the working tree as the point reviewed so far.
-  reviewed = function(arg)
-    local name = arg ~= '' and arg or nil
-    local id = wt().snapshot(name)
-    if id:match('^error: ') then
-      return report(id)
-    end
-    vim.notify(('walkthrough: recorded refs/walkthrough/%s at %s'):format(name or 'reviewed', id:sub(1, 7)),
-      vim.log.levels.INFO)
-  end,
+  reviewed = function(arg) reviewed(arg ~= '' and arg or nil) end,
+  keys = function() wt().keys() end,
 }
 local names = vim.tbl_keys(subcommands)
 table.sort(names)
@@ -146,21 +149,44 @@ end, {
   end,
 })
 
-local plugs = {
-  next = function() wt().step(1) end,
-  prev = function() wt().step(-1) end,
-  ['note-next'] = function() wt().note(1) end,
-  ['note-prev'] = function() wt().note(-1) end,
-  ask = function() wt().ask_line() end,
-  stage = function() wt().stage_group() end,
-  close = function() report(wt().close()) end,
-  comment = function() wt().comment() end,
-  send = function() wt().send() end,
-}
-for name, fn in pairs(plugs) do
-  vim.keymap.set('n', '<Plug>(walkthrough-' .. name .. ')', fn, { desc = 'Walkthrough: ' .. name })
+-- One <Plug> mapping per action: name -> { function, modes }. Modes default
+-- to normal. The comment mappings work on a selection too.
+local function plug(fn, modes)
+  return { fn, modes or { 'n' } }
 end
--- On a selection the comment covers its lines.
-vim.keymap.set('x', '<Plug>(walkthrough-comment)', function()
-  wt().comment()
-end, { desc = 'Walkthrough: comment' })
+local function comment(ctype)
+  return plug(function() wt().comment(ctype) end, { 'n', 'x' })
+end
+local plugs = {
+  next = plug(function() wt().step(1) end),
+  prev = plug(function() wt().step(-1) end),
+  back = plug(function() wt().step(0) end),
+  ['note-next'] = plug(function() wt().note(1) end),
+  ['note-prev'] = plug(function() wt().note(-1) end),
+  ['group-next'] = plug(function() wt().group('next') end),
+  ['group-prev'] = plug(function() wt().group('prev') end),
+  ask = plug(function() wt().ask_line() end),
+  comment = comment('question'),
+  ['comment-issue'] = comment('issue'),
+  ['comment-suggestion'] = comment('suggestion'),
+  ['comment-delete'] = plug(function() wt().comment_delete() end),
+  send = plug(function() wt().send() end),
+  accept = plug(function() wt().decide('accept') end),
+  decline = plug(function() wt().decide('reject') end),
+  undecide = plug(function() wt().decide('clear') end),
+  simpler = plug(function() wt().explain('simpler') end),
+  deeper = plug(function() wt().explain('deeper') end),
+  ['check-reveal'] = plug(function() wt().check('reveal') end),
+  ['check-answer'] = plug(function() wt().check('answer') end),
+  stage = plug(function() wt().stage_group() end),
+  ['stage-all'] = plug(function() wt().stage_group({ all = true }) end),
+  reject = plug(function() wt().reject_group() end),
+  base = plug(function() wt().base() end),
+  reviewed = plug(function() reviewed() end),
+  resume = plug(function() report(wt().resume()) end),
+  close = plug(function() report(wt().close()) end),
+  keys = plug(function() wt().keys() end),
+}
+for name, p in pairs(plugs) do
+  vim.keymap.set(p[2], '<Plug>(walkthrough-' .. name .. ')', p[1], { desc = 'Walkthrough: ' .. name })
+end

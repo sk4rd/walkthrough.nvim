@@ -120,7 +120,7 @@ session whether Neovim is reachable. Without it the skill runs
 | `sender` | `'auto'` | `'auto'`, `'claudecode'`, `'terminal'`, `'clipboard'` or `function(msg)` |
 | `terminal_pattern` | `{ 'claude', 'codex', 'opencode', 'gemini', 'aider', 'amp' }` | which terminal buffer is the agent (the default list matches `amp` as a whole word) |
 | `state_dir` | `stdpath('state') .. '/walkthrough'` | where the review is saved |
-| `keys` | `false` | `true` maps the [suggested keys](#keys) that are still free |
+| `keys` | `false` | `true` maps the [default keys](#keys) under `<leader>w`; a string is the prefix; `false` maps nothing |
 
 ## Commands
 
@@ -142,31 +142,39 @@ session whether Neovim is reachable. Without it the skill runs
 | `reject` | discard the group's unstaged lines in this file (asks first) |
 | `base` | show the file as it was before the change, in a float |
 | `reviewed [name]` | record the working tree as `refs/walkthrough/<name>` |
+| `keys` | show the key cheat sheet |
 | `status` | one line about the review |
 | `resume`, `discard`, `close` | bring back, delete or forget the saved review |
 
 ## Keys
 
-The plugin defines no global key by default. It defines `<Plug>` mappings:
-`<Plug>(walkthrough-next)`, `-prev`, `-note-next`, `-note-prev`, `-ask`,
-`-comment`, `-send`, `-stage` and `-close`. With `keys = true`, `setup()`
-maps these keys, each only if it is still free:
+Every action has a `<Plug>(walkthrough-...)` mapping; the list is in
+`:help walkthrough-mappings`. The plugin maps no global key by default.
+`keys = true` maps the keys below under the prefix `<leader>w`;
+`keys = '<leader>r'` (any string) uses that prefix instead. A key is mapped
+only if it is still free. `<leader>w?` shows a cheat sheet with the keys that
+are mapped right now (`:Walkthrough keys` does the same).
 
-| Key | Does |
-|---|---|
-| `]w` `[w` | next / previous step |
-| `]n` `[n` | next / previous note |
-| `<leader>an` | ask |
-| `<leader>ac` | comment (normal and visual mode) |
-| `<leader>as` | send |
-| `<leader>gw` | stage |
-| `<leader>aw` | close |
+| Key | Does | Key | Does |
+|---|---|---|---|
+| `]w` `[w` | next / previous step | `P-` | simpler |
+| `]n` `[n` | next / previous note | `P+` `P=` | deeper |
+| `Pw` | show the current step again | `Pr` | reveal the check |
+| `P]` `P[` | next / previous tour | `Pe` | answer the check |
+| `Pa` | ask | `Ps` | stage (this file) |
+| `Pc` `Pi` `Pu` | comment: question / issue / suggestion | `PS` | stage all |
+| `PX` | delete the comment here | `Px` | discard the group's unstaged lines |
+| `Pm` | send to the agent | `Pb` | base view |
+| `Py` `Pd` `P0` | accept / decline / clear the note's verdict | `Pv` | record a reviewed snapshot |
+| | | `PR` `Pq` | resume / close |
 
-Or map them yourself: `vim.keymap.set('n', ']w', '<Plug>(walkthrough-next)')`.
+`P` is the prefix. `]w`, `[w`, `]n` and `[n` do not use it.
 
 In the panel: `<CR>` jumps to the note under the cursor, or opens a
 `path:line`; `a` asks; `-` and `+` ask for a simpler or deeper explanation;
-`r` and `e` reveal and answer the check.
+`r` and `e` reveal and answer the check; `s` and `S` stage; `y`, `d` and `u`
+accept, decline and clear the note's verdict; `m` sends; `b` shows the base;
+`x` discards the group's unstaged lines; `?` shows the cheat sheet.
 
 The default layout is `[ agent | panel | code ]`: the panel sits left of the
 code, next to an agent terminal on the far left. For claudecode.nvim that is

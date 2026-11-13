@@ -66,7 +66,7 @@ st.config = vim.tbl_extend('keep', st.config or {}, {
   -- terminal buffer; or fun(name, title, buf) -> boolean.
   terminal_pattern = { 'claude', 'codex', 'opencode', 'gemini', 'aider', '%f[%w]amp%f[%W]' },
   state_dir = vim.fn.stdpath('state') .. '/walkthrough', -- review state, one file per repository
-  keys = false, -- true: map the suggested keys that are still free
+  keys = false, -- true: map the default keys that are still free under <leader>w; a string: under that prefix
 })
 
 return st

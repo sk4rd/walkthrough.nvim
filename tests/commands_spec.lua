@@ -30,7 +30,7 @@ end
 check('<Plug>(walkthrough-comment) exists in visual mode too', vim.fn.maparg('<Plug>(walkthrough-comment)', 'x') ~= '')
 
 -- No keys by default, and the hints name none ---------------------------------------
-check('no global key by default', vim.fn.maparg(']w', 'n') == '' and vim.fn.maparg('<leader>an', 'n') == '')
+check('no global key by default', vim.fn.maparg(']w', 'n') == '' and vim.fn.maparg('<leader>wa', 'n') == '')
 send('load', { group = 'A', steps = {
   { file = f, title = 'one', notes = { { line = 2, text = 'a' }, { line = 8, text = 'b' } } },
   { file = g, title = 'two' },
@@ -39,6 +39,7 @@ send('load', { group = 'A', steps = {
 local bar = H.panel_winbar()
 check('hints: panel keys always', bar:match('<CR> jump to note') and bar:match('a ask'), bar)
 check('hints: no global key is named when none is mapped', not bar:match('%]w') and not bar:match('%[w') and not bar:match('leader'), bar)
+check('hints: end with the cheat sheet key of the panel', bar:match('%? all keys$') ~= nil, bar)
 
 -- Subcommands ----------------------------------------------------------------------
 vim.cmd('Walkthrough next')
@@ -123,24 +124,24 @@ check('setup(keys = true) works', pcall(w.setup, { keys = true }))
 check('keys: an existing mapping is kept', vim.fn.maparg(']w', 'n', false, true).callback ~= nil)
 local expect = {
   ['[w'] = 'prev', [']n'] = 'note-next', ['[n'] = 'note-prev',
-  ['<leader>an'] = 'ask', ['<leader>gw'] = 'stage', ['<leader>aw'] = 'close',
-  ['<leader>ac'] = 'comment', ['<leader>as'] = 'send',
+  ['<leader>wa'] = 'ask', ['<leader>ws'] = 'stage', ['<leader>wq'] = 'close',
+  ['<leader>wc'] = 'comment', ['<leader>wm'] = 'send',
 }
 for lhs, name in pairs(expect) do
   check('keys: ' .. lhs .. ' -> ' .. name, vim.fn.maparg(lhs, 'n', false, true).rhs == '<Plug>(walkthrough-' .. name .. ')')
 end
-check('keys: <leader>ac also comments on a selection', vim.fn.maparg('<leader>ac', 'x', false, true).rhs == '<Plug>(walkthrough-comment)')
+check('keys: <leader>wc also comments on a selection', vim.fn.maparg('<leader>wc', 'x', false, true).rhs == '<Plug>(walkthrough-comment)')
+check('keys: the old agent-plugin keys are not taken', vim.fn.maparg('<leader>ac', 'n') == '' and vim.fn.maparg('<leader>as', 'n') == ''
+  and vim.fn.maparg('<leader>an', 'n') == '' and vim.fn.maparg('<leader>gw', 'n') == '' and vim.fn.maparg('<leader>aw', 'n') == '')
 vim.api.nvim_feedkeys(']w', 'x', false)
 check('keys: pressing the kept key runs the user\'s function', vim.g.my_own_key == true)
 
 -- Hints follow the mappings -----------------------------------------------------------------
 w.step(1)
 bar = H.panel_winbar()
-check('hints: a mapped plug key is named', bar:match('%[w prev') and bar:match('%]n next note') and bar:match('an ask')
-  and bar:match('stage') and bar:match('close'), bar)
-check('hints: a key mapped to something else is not named', not bar:match('%]w next'), bar)
+check('hints: global keys are not listed, the cheat sheet key ends the bar', not bar:match('%[w') and not bar:match('%]n')
+  and not bar:match('leader') and bar:match('%? all keys$'), bar)
 check('hints: panel keys remain', bar:match('<CR> jump to note') ~= nil)
-check('hints: the new plug keys are named once mapped', bar:match('ac comment') and bar:match('as send'), bar)
 check('hints: no check keys on a step without a check', not bar:match('r reveal') and not bar:match('e answer'), bar)
 
 press('close')

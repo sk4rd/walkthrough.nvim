@@ -581,6 +581,8 @@ local function jump_to_note()
   center(win, math.max(1, math.min(ref.line, vim.api.nvim_buf_line_count(vim.api.nvim_win_get_buf(win)))))
 end
 
+M.jump_to_note = jump_to_note
+
 -- Scroll the panel so note n's `### [n]` heading is at the top.
 local function show_note_in_panel(n)
   if not (st.panel_win and vim.api.nvim_win_is_valid(st.panel_win)) then
@@ -649,43 +651,78 @@ function M.keep_code_wide()
   enforcing = false
 end
 
--- Key hints name only keys that exist: the panel's own buffer-local keys,
--- and a global key only when it is mapped to one of the <Plug> mappings
--- (plugin/walkthrough.lua), looked up in the mappings as they are now.
-local plug_hints = {
-  { 'next', 'next' },
-  { 'prev', 'prev' },
-  { 'note-next', 'next note' },
-  { 'note-prev', 'prev note' },
-  { 'ask', 'ask' },
-  { 'comment', 'comment' },
-  { 'send', 'send' },
-  { 'stage', 'stage' },
-  { 'close', 'close' },
+-- The keys the <Plug> mappings (plugin/walkthrough.lua) are mapped to right
+-- now, looked up in the mappings as they are: name -> list of keys, shortest
+-- first. Buffer-local mappings of the code and current buffers count too;
+-- they win over global ones. A leader key is shown as <leader>.
+function M.plug_keys()
+  local maps = {}
+  local code = st.code_win and vim.api.nvim_win_is_valid(st.code_win) and vim.api.nvim_win_get_buf(st.code_win)
+  for _, buf in ipairs({ code or -1, vim.api.nvim_get_current_buf() }) do
+    if buf ~= -1 and vim.api.nvim_buf_is_valid(buf) then
+      vim.list_extend(maps, vim.api.nvim_buf_get_keymap(buf, 'n'))
+    end
+  end
+  vim.list_extend(maps, vim.api.nvim_get_keymap('n'))
+  local leader = vim.fn.keytrans(vim.g.mapleader or '\\')
+  local keys = {}
+  for _, m in ipairs(maps) do
+    local name = m.rhs and m.rhs:match('^<Plug>%(walkthrough%-([%w-]+)%)$')
+    if name then
+      local lhs = m.lhs
+      if lhs:sub(1, #leader) == leader and #lhs > #leader then
+        lhs = '<leader>' .. lhs:sub(#leader + 1)
+      end
+      keys[name] = keys[name] or {}
+      if not vim.tbl_contains(keys[name], lhs) then
+        table.insert(keys[name], lhs)
+      end
+    end
+  end
+  for _, list in pairs(keys) do
+    table.sort(list, function(x, y)
+      return #x ~= #y and #x < #y or (#x == #y and x < y)
+    end)
+  end
+  return keys
+end
+
+-- The panel's own keys, local to its buffer (the buffer is not modifiable, so
+-- single keys are free). `keys` are the lhs, `label` the hint and the cheat
+-- sheet's text, `check` marks the ones that exist only on a step with a check.
+-- Motion and search keys (n, q, j, k, /) are left alone.
+local function lazy(module, fn, ...)
+  local args = { ... }
+  return function()
+    require('walkthrough.' .. module)[fn](unpack(args))
+  end
+end
+M.panel_keys = {
+  { keys = { '<CR>' }, label = 'jump to note', desc = 'Jump to note in code', run = function() M.jump_to_note() end },
+  { keys = { 'a' }, label = 'ask', desc = 'Ask the agent about this note', run = lazy('send', 'ask_panel') },
+  { keys = { '-' }, label = 'simpler', desc = 'Ask for a simpler explanation', run = lazy('feedback', 'explain', 'simpler') },
+  { keys = { '+', '=' }, label = 'deeper', desc = 'Ask for a deeper explanation', run = lazy('feedback', 'explain', 'deeper') },
+  { keys = { 'r' }, label = 'reveal', desc = 'Reveal the answer of the check', check = true, run = lazy('feedback', 'check', 'reveal') },
+  { keys = { 'e' }, label = 'answer', desc = 'Write your answer to the check', check = true, run = lazy('feedback', 'check', 'answer') },
+  { keys = { 's' }, label = 'stage', desc = 'Stage the group in this file', run = lazy('stage', 'stage_group') },
+  { keys = { 'S' }, label = 'stage all', desc = 'Stage the group in every file of the tour', run = lazy('stage', 'stage_group', { all = true }) },
+  { keys = { 'y' }, label = 'accept', desc = 'Accept the verdict of this note', run = lazy('feedback', 'decide', 'accept') },
+  { keys = { 'd' }, label = 'decline', desc = 'Decline the verdict of this note', run = lazy('feedback', 'decide', 'reject') },
+  { keys = { 'u' }, label = 'clear decision', desc = 'Clear the decision on this note', run = lazy('feedback', 'decide', 'clear') },
+  { keys = { 'm' }, label = 'send', desc = 'Send comments, decisions and answers to the agent', run = lazy('feedback', 'send') },
+  { keys = { 'b' }, label = 'base view', desc = 'Show the file as it was before the change', run = lazy('base', 'show') },
+  { keys = { 'x' }, label = 'reject group', desc = "Discard the group's unstaged lines in this file", run = lazy('reject', 'reject_group') },
+  { keys = { '?' }, label = 'all keys', desc = 'Show all keys', run = lazy('keys', 'show') },
 }
 
+-- Key hints name only keys that exist: the panel's own keys, and the key of
+-- the cheat sheet. Every other key is in the cheat sheet (keys.lua).
 local function hint_parts(step)
   local parts = { '<CR> jump to note', 'a ask', '- simpler', '+ deeper' }
   if step and step.check then
     vim.list_extend(parts, { 'r reveal', 'e answer' })
   end
-  local keys = {}
-  local maps = vim.api.nvim_get_keymap('n')
-  local buf = st.code_win and vim.api.nvim_win_is_valid(st.code_win) and vim.api.nvim_win_get_buf(st.code_win)
-  if buf then
-    vim.list_extend(maps, vim.api.nvim_buf_get_keymap(buf, 'n'))
-  end
-  for _, m in ipairs(maps) do
-    local name = m.rhs and m.rhs:match('^<Plug>%(walkthrough%-([%w-]+)%)$')
-    if name and not keys[name] then
-      keys[name] = m.lhs
-    end
-  end
-  for _, h in ipairs(plug_hints) do
-    if keys[h[1]] then
-      table.insert(parts, keys[h[1]] .. ' ' .. h[2])
-    end
-  end
+  table.insert(parts, '? all keys')
   return parts
 end
 
@@ -739,18 +776,13 @@ function M.panel(text, keep_cursor)
     st.panel_buf = vim.api.nvim_create_buf(false, true) -- unlisted scratch buffer
     vim.bo[st.panel_buf].filetype = 'markdown'
     vim.bo[st.panel_buf].bufhidden = 'hide'
-    vim.keymap.set('n', '<CR>', M.safe(jump_to_note), { buffer = st.panel_buf, desc = 'Jump to note in code' })
-    vim.keymap.set('n', 'a', M.safe(function()
-      require('walkthrough.send').ask_panel()
-    end), { buffer = st.panel_buf, desc = 'Ask the agent about this note' })
-    local function explain(level)
-      return M.safe(function()
-        require('walkthrough.feedback').explain(level)
-      end)
+    for _, k in ipairs(M.panel_keys) do
+      if not k.check then
+        for _, lhs in ipairs(k.keys) do
+          vim.keymap.set('n', lhs, M.safe(k.run), { buffer = st.panel_buf, desc = 'Walkthrough: ' .. k.desc })
+        end
+      end
     end
-    vim.keymap.set('n', '-', explain('simpler'), { buffer = st.panel_buf, desc = 'Ask for a simpler explanation' })
-    vim.keymap.set('n', '+', explain('deeper'), { buffer = st.panel_buf, desc = 'Ask for a deeper explanation' })
-    vim.keymap.set('n', '=', explain('deeper'), { buffer = st.panel_buf, desc = 'Ask for a deeper explanation' })
   end
   if not (st.panel_win and vim.api.nvim_win_is_valid(st.panel_win)) then
     st.panel_win = vim.api.nvim_open_win(st.panel_buf, false, {
@@ -924,17 +956,16 @@ end
 
 -- `r` and `e` exist in the panel only while the step has a check.
 local function set_check_keys(step)
-  local buf = st.panel_buf
-  if step.check then
-    vim.keymap.set('n', 'r', M.safe(function()
-      require('walkthrough.feedback').check('reveal')
-    end), { buffer = buf, desc = 'Reveal the answer of the check' })
-    vim.keymap.set('n', 'e', M.safe(function()
-      require('walkthrough.feedback').check('answer')
-    end), { buffer = buf, desc = 'Write your answer to the check' })
-  else
-    pcall(vim.keymap.del, 'n', 'r', { buffer = buf })
-    pcall(vim.keymap.del, 'n', 'e', { buffer = buf })
+  for _, k in ipairs(M.panel_keys) do
+    if k.check then
+      for _, lhs in ipairs(k.keys) do
+        if step.check then
+          vim.keymap.set('n', lhs, M.safe(k.run), { buffer = st.panel_buf, desc = 'Walkthrough: ' .. k.desc })
+        else
+          pcall(vim.keymap.del, 'n', lhs, { buffer = st.panel_buf })
+        end
+      end
+    end
   end
 end
 

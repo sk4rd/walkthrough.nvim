@@ -53,7 +53,7 @@ The agent talks to Neovim over its server socket, with |--remote-expr|:
 buffers), else the only `nvim.*.0` socket in `$XDG_RUNTIME_DIR`.
 
 The plugin defines the command `:Walkthrough` and the |<Plug>| mappings. It
-defines no global key unless you pass `keys = true` to setup().
+defines no global key unless you pass `keys` to setup().
 
 Requirements: Neovim 0.10 or newer, and `git`. Staging, rejecting and the
 staged counter need https://github.com/lewis6991/gitsigns.nvim .
@@ -98,8 +98,11 @@ setup({opts}) is optional. It raises an error for an invalid `panel_side`,
   `state_dir`        Where the review state is saved, one file per
                      repository. Default: |stdpath()| "state" followed by
                      "/walkthrough". See |walkthrough-persistence|.
-  `keys`             `true` maps the suggested keys that are still free. See
-                     |walkthrough-mappings|. Default `false`.
+  `keys`             `true` maps the default keys under the prefix
+                     `<leader>w`. A string maps them under that prefix.
+                     `false` maps nothing. Only keys that are still free
+                     are mapped. See |walkthrough-mappings|. Default
+                     `false`.
 
 ==============================================================================
 3. COMMANDS                                                  *walkthrough-commands*
@@ -173,41 +176,92 @@ Session
                               reviewed (|walkthrough-incremental|). The default
                               name is "reviewed". It notifies with the short
                               commit id.
+  `:Walkthrough keys`         show the key cheat sheet (|walkthrough-mappings|).
 
 ==============================================================================
 4. MAPPINGS                                                  *walkthrough-mappings*
 
-The plugin defines these |<Plug>| mappings (normal mode; `comment` also in
-visual mode, where it covers the selected lines):
+Every action has a |<Plug>| mapping (normal mode; the `comment` ones also in
+visual mode, where they cover the selected lines):
 
-  <Plug>(walkthrough-next)         next step
-  <Plug>(walkthrough-prev)         previous step
-  <Plug>(walkthrough-note-next)    next note
-  <Plug>(walkthrough-note-prev)    previous note
-  <Plug>(walkthrough-ask)          ask the agent about this line's note
-  <Plug>(walkthrough-comment)      comment on this line or selection
-  <Plug>(walkthrough-send)         send comments, decisions and answers
-  <Plug>(walkthrough-stage)        stage the group in this file
-  <Plug>(walkthrough-close)        close the tour
+  <Plug>(walkthrough-next)               next step
+  <Plug>(walkthrough-prev)               previous step
+  <Plug>(walkthrough-back)               show the current step again
+  <Plug>(walkthrough-note-next)          next note
+  <Plug>(walkthrough-note-prev)          previous note
+  <Plug>(walkthrough-group-next)         next loaded tour
+  <Plug>(walkthrough-group-prev)         previous loaded tour
+  <Plug>(walkthrough-ask)                ask the agent about this note or line
+  <Plug>(walkthrough-comment)            comment of type question
+  <Plug>(walkthrough-comment-issue)      comment of type issue
+  <Plug>(walkthrough-comment-suggestion) comment of type suggestion
+  <Plug>(walkthrough-comment-delete)     delete the comment under the cursor
+  <Plug>(walkthrough-send)               send comments, decisions and answers
+  <Plug>(walkthrough-accept)             accept the verdict of this note
+  <Plug>(walkthrough-decline)            decline the verdict of this note
+  <Plug>(walkthrough-undecide)           clear the decision on this note
+  <Plug>(walkthrough-simpler)            ask for a simpler explanation
+  <Plug>(walkthrough-deeper)             ask for a deeper explanation
+  <Plug>(walkthrough-check-reveal)       reveal the answer of the check
+  <Plug>(walkthrough-check-answer)       write your answer to the check
+  <Plug>(walkthrough-stage)              stage the group in this file
+  <Plug>(walkthrough-stage-all)          stage the group in every file
+  <Plug>(walkthrough-reject)             discard the group's unstaged lines
+  <Plug>(walkthrough-base)               show the base version
+  <Plug>(walkthrough-reviewed)           record a reviewed snapshot
+  <Plug>(walkthrough-resume)             bring back the saved review
+  <Plug>(walkthrough-close)              close the tour
+  <Plug>(walkthrough-keys)               show the key cheat sheet
 
-With `keys = true`, setup() maps these keys, each one only when it is still
-free (a key that you or another plugin mapped is left alone):
+With `keys = true`, setup() maps the default keys under the prefix
+`<leader>w`. With `keys = '<leader>r'` (any string) it uses that prefix. With
+`keys = false` (the default) it maps nothing. A key is mapped only when it is
+still free: a key that you or another plugin mapped is left alone, and
+calling setup() again changes nothing. Each mapping has a description that
+starts with "Walkthrough: ". If which-key.nvim is installed, the prefix is
+registered as the group "walkthrough".
+
+In the table, P is the prefix. `]w`, `[w`, `]n` and `[n` do not use it.
 
   ]w  [w            next / previous step
   ]n  [n            next / previous note
-  <leader>an        ask
-  <leader>ac        comment (normal and visual mode)
-  <leader>as        send
-  <leader>gw        stage
-  <leader>aw        close
+  Pw                show the current step again
+  P]  P[            next / previous tour
+  Pa                ask
+  Pc                comment: question (normal and visual mode)
+  Pi                comment: issue (normal and visual mode)
+  Pu                comment: suggestion (normal and visual mode)
+  PX                delete the comment here
+  Pm                send (message the agent)
+  Py                accept the verdict of the note
+  Pd                decline the verdict of the note
+  P0                clear the decision
+  P-                simpler
+  P+  P=            deeper
+  Pr                reveal the answer of the check
+  Pe                answer the check
+  Ps                stage the group in this file
+  PS                stage the group in every file
+  Px                discard the group's unstaged lines (asks first)
+  Pb                base view
+  Pv                record a reviewed snapshot
+  PR                resume
+  Pq                close the tour
+  P?                key cheat sheet
 
-Without `keys`, map them yourself:
+Without `keys`, map the actions yourself:
 
 >lua
     vim.keymap.set('n', ']w', '<Plug>(walkthrough-next)')
 <
 
-Keys in the panel (local to its buffer):
+The cheat sheet (`:Walkthrough keys`, `P?`, `?` in the panel) is a float
+that lists every action with the key mapped to it right now. An action
+without a key is shown as its `:Walkthrough` command, so the sheet works with
+`keys = false`. `q` and `<Esc>` close it.
+
+Keys in the panel (local to its buffer, which cannot be changed, so single
+keys are free):
 
   <CR>      on a `### [n]` heading: move the code to note n. On a
             `path:line` text: open that file at that line in the code
@@ -218,9 +272,18 @@ Keys in the panel (local to its buffer):
   +  =      ask for a deeper explanation
   r         reveal the answer of the check (only while the step has a check)
   e         write your answer to the check (only while the step has a check)
+  s         stage the group in this file
+  S         stage the group in every file of the tour
+  y         accept the verdict of the note whose section the cursor is in
+  d         decline it
+  u         clear the decision
+  m         send comments, decisions and answers
+  b         base view
+  x         discard the group's unstaged lines in this file
+  ?         key cheat sheet
 
 The panel's winbar shows `Step n/total`, the group, `seen a/b`, `staged x/y`,
-the title, and the keys that are mapped. It adds "unsaved changes: save to
+the title, the panel's keys and `? all keys`. It adds "unsaved changes: save to
 refresh" while the code buffer is modified.
 
 ==============================================================================
@@ -307,6 +370,7 @@ a notification (|vim.notify()|).
   explain({x})        "simpler" or "deeper"
   check({x})          "reveal" or "answer"
   base()              the base version in a float
+  keys()              the key cheat sheet in a float
 
 Helpers for mappings and other plugins:
 

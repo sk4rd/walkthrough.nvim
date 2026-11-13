@@ -18,6 +18,7 @@
 --   reject.lua    discarding a group's unstaged changes
 --   base.lua      the base version of the file in a float
 --   snapshot.lua  the working tree as a commit under refs/walkthrough/
+--   keys.lua      the default keys (setup) and the key cheat sheet
 --   health.lua :checkhealth walkthrough
 -- plugin/walkthrough.lua defines :Walkthrough and the <Plug> mappings.
 --
@@ -35,31 +36,16 @@ local feedback = require('walkthrough.feedback')
 local reject = require('walkthrough.reject')
 local base = require('walkthrough.base')
 local snapshot = require('walkthrough.snapshot')
+local keys = require('walkthrough.keys')
 
 local M = {}
 
 local senders = { auto = true, claudecode = true, terminal = true, clipboard = true }
 
--- The keys setup({ keys = true }) maps, each to a <Plug> mapping.
-local suggested_keys = {
-  { ']w', 'next' }, { '[w', 'prev' }, { ']n', 'note-next' }, { '[n', 'note-prev' },
-  { '<leader>an', 'ask' }, { '<leader>gw', 'stage' }, { '<leader>aw', 'close' },
-  { '<leader>ac', 'comment', { 'n', 'x' } }, { '<leader>as', 'send' },
-}
-
--- A key the user (or another plugin) mapped already is theirs.
-local function map_suggested_keys()
-  for _, k in ipairs(suggested_keys) do
-    for _, mode in ipairs(k[3] or { 'n' }) do
-      if vim.fn.maparg(k[1], mode) == '' then
-        vim.keymap.set(mode, k[1], '<Plug>(walkthrough-' .. k[2] .. ')', { remap = true, desc = 'Walkthrough: ' .. k[2] })
-      end
-    end
-  end
-end
-
 --- Optional: setup({ panel_side, panel_width, panel_min_width, code_min_ratio,
 --- max_removed_lines, sender, terminal_pattern, state_dir, keys })
+--- `keys`: true maps the default keys under <leader>w, a string uses that
+--- prefix, false (default) maps nothing.
 function M.setup(opts)
   opts = opts or {}
   if opts.panel_side and opts.panel_side ~= 'left' and opts.panel_side ~= 'right' then
@@ -72,8 +58,10 @@ function M.setup(opts)
     error('walkthrough: sender must be "auto", "claudecode", "terminal", "clipboard" or a function')
   end
   st.config = vim.tbl_extend('force', st.config, opts)
-  if st.config.keys then
-    map_suggested_keys()
+  -- `keys` is true (prefix <leader>w), a prefix string, or false.
+  local prefix = keys.prefix(st.config.keys)
+  if prefix then
+    keys.map(prefix)
   end
 end
 
@@ -429,6 +417,7 @@ M.explain = ui.safe(feedback.explain)
 M.check = ui.safe(feedback.check)
 M.reject_group = ui.safe(reject.reject_group)
 M.base = ui.safe(base.show)
+M.keys = ui.safe(keys.show)
 -- The same items as `send`, as JSON; a socket entry point (see feedback.lua).
 M.inbox = feedback.inbox
 

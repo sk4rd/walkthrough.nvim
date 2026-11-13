@@ -88,6 +88,19 @@ for name in pairs(plugs) do
 end
 check('every <Plug> mapping is in doc/walkthrough.txt', #plug_missing == 0, 'missing: ' .. table.concat(plug_missing, ', '))
 
+-- Default keys: each suffix (or absolute key) appears in the help file, as
+-- written there: the prefix is shown as P, so "P" followed by the suffix.
+local key_missing = {}
+local defaults = require('walkthrough.keys').defaults
+check('the default keys are found', #defaults > 0)
+for _, k in ipairs(defaults) do
+  local shown = k[4] and k[1] or ('P' .. k[1])
+  if not help:find('  ' .. shown, 1, true) then
+    table.insert(key_missing, shown)
+  end
+end
+check('every default key is in doc/walkthrough.txt', #key_missing == 0, 'missing: ' .. table.concat(key_missing, ', '))
+
 -- Public Lua functions of the module.
 local api_missing = {}
 for name, fn in pairs(H.w) do
