@@ -587,10 +587,18 @@ end
 ---   is cleared (one that was sent stands: the agent is applying it);
 --- - that is closed (declined or done) continues it: it is open again, and
 ---   its old decision is no longer the state of affairs.
-function M.reply(t, step, th, text)
+--- `kind` is what the user wrote, when the key says so: a change request
+--- ('change') in a question thread makes the thread a change request, so the
+--- agent proposes instead of answering. A question in a change request stays
+--- a reply in it.
+function M.reply(t, step, th, text, kind)
   text = vim.trim(text or '')
   if text == '' then
     return false
+  end
+  local became_change = kind == 'change' and th.kind == 'question'
+  if became_change then
+    th.kind = 'change'
   end
   local decision, sent = tour.thread_decision(th)
   local closed = finished(th)
@@ -606,7 +614,8 @@ function M.reply(t, step, th, text)
     return deliver_now({ thread_item(t, step_index(t, step), step, th) }, 'question ' .. th.id)
   end
   changed(t.root)
-  notify(('reply added to %s; %s delivers it'):format(th.id, t.plan and 'plan feedback' or 'send'))
+  notify((became_change and '%s is a change request now; %s delivers it' or 'reply added to %s; %s delivers it')
+    :format(th.id, t.plan and 'plan feedback' or 'send'))
   return false
 end
 
@@ -703,7 +712,7 @@ local function write(kind, text, range)
     end
     local e, th = thread_for(entries, from, to)
     if th then
-      return M.reply(e.t, e.step, th, answer)
+      return M.reply(e.t, e.step, th, answer, kind)
     end
     -- The entry the cursor is in, else the first of the file; a file no tour
     -- lists gets an entry in `Other files`.
@@ -735,7 +744,8 @@ local function write(kind, text, range)
   local _, open = thread_for(tours.entries(file), from, to)
   local title, prompt
   if open then
-    title = ('Reply in %s'):format(open.id)
+    -- A change request written in a question thread is what the thread becomes.
+    title = ((kind == 'change' and open.kind == 'question') and 'Change request in %s' or 'Reply in %s'):format(open.id)
     prompt = ('%s on line %s: '):format(title, where(from, to))
   else
     local what = kind == 'question' and 'Question' or 'Change request'
@@ -753,7 +763,8 @@ function M.ask(text, range)
 end
 
 --- Request a change of the code on those lines. It is collected: `send`
---- delivers it, and the agent answers with a proposal.
+--- delivers it, and the agent answers with a proposal. On lines that carry a
+--- question thread, the thread becomes a change request (see M.reply).
 function M.change(text, range)
   return write('change', text, range)
 end

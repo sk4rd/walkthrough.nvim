@@ -77,8 +77,9 @@ vim.cmd('Walkthrough ask why is this here')
 check(':Walkthrough ask reaches ask: a thread, sent', asked and asked.text:match('User: why is this here') and #log >= 1
   and not log[1].msg:match('unknown subcommand'), vim.inspect(log))
 vim.cmd('Walkthrough change rename it')
-check(':Walkthrough change on the lines of a thread replies in it', _G.walkthrough_state.history[1].threads[1].messages[2].text == 'rename it'
-  and _G.walkthrough_state.history[1].threads[1].kind == 'question', vim.inspect(_G.walkthrough_state.history[1].threads))
+check(':Walkthrough change on the lines of a question thread makes it a change request', _G.walkthrough_state.history[1].threads[1].messages[2].text == 'rename it'
+  and _G.walkthrough_state.history[1].threads[1].kind == 'change' and #_G.walkthrough_state.history[1].threads == 1,
+  vim.inspect(_G.walkthrough_state.history[1].threads))
 vim.cmd('Walkthrough thread-delete')
 check(':Walkthrough thread-delete', #(_G.walkthrough_state.history[1].threads or {}) == 0)
 

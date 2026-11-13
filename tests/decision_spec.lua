@@ -564,6 +564,64 @@ answer = 'continue this one'
 w.ask()
 check('stored: ... and can be continued', #threads() == 1 and #th('t1').messages == 3 and th('t1').state == 'draft')
 
+-- A change request written in a question thread: the thread becomes a change request ------------------------------
+open()
+at(20)
+w.ask('what is line 20 for?')
+local q = threads()[#threads()]
+check('convert: a question thread, sent at once', q.kind == 'question' and q.state == 'waiting' and #sent == 1)
+send('patch', { thread = q.id, answer = 'it holds the limit' })
+check('convert: answered', th(q.id).state == 'answered')
+sent = {}
+local prompts = {}
+vim.ui.input = function(opts, cb)
+  table.insert(prompts, opts.prompt)
+  cb(answer)
+end
+answer = 'then make the limit configurable'
+reset_log()
+at(20)
+w.change()
+check('convert: the prompt says it is a change request in the thread', prompts[1] ~= nil
+  and prompts[1]:match('^Change request in ' .. q.id) ~= nil, vim.inspect(prompts))
+check('convert: no new thread; the question thread is a change request now', #threads() == 1 and th(q.id).kind == 'change'
+  and #th(q.id).messages == 3 and th(q.id).messages[3].text == 'then make the limit configurable', vim.inspect(threads()))
+check('convert: it is collected, not sent', #sent == 0 and th(q.id).state == 'draft'
+  and find('is a change request now; send delivers it') ~= nil, vim.inspect(log))
+w.send()
+check('convert: send asks for a proposal, not for an answer', #sent == 1 and sent[1].text:match('Change request ' .. q.id) ~= nil
+  and sent[1].text:match('reply with a proposal') ~= nil and not sent[1].text:match('Answer it without changing any code'), sent[1] and sent[1].text)
+send('patch', { thread = q.id, answer = 'I would read it from LIMIT', proposal = true })
+check('convert: the proposal can be decided', th(q.id).state == 'proposed' and (function()
+  at(20)
+  w.decide('accept')
+  return th(q.id).decision == 'accept'
+end)())
+-- The other way round a question stays a reply: a change request keeps its proposal flow.
+prompts, sent = {}, {}
+answer = 'why from the environment?'
+at(20)
+w.ask()
+check('convert: a question in a change request is a reply in it', prompts[1] ~= nil and prompts[1]:match('^Reply in ' .. q.id) ~= nil
+  and th(q.id).kind == 'change' and #threads() == 1 and #sent == 0, vim.inspect({ prompts, th(q.id).kind }))
+-- The same with the text given, and in the thread float the reply key changes nothing.
+open()
+at(21)
+w.ask('q?')
+q = threads()[#threads()]
+w.change('do it')
+check('convert: with the text given as an argument', th(q.id).kind == 'change' and #threads() == 1)
+open()
+at(22)
+w.ask('q2?')
+q = threads()[#threads()]
+answer = 'a follow-up'
+w.ask()
+check('convert: a question in a question thread stays a question', th(q.id).kind == 'question' and #th(q.id).messages == 2)
+vim.ui.input = function(_, cb)
+  cb(answer)
+end
+
 -- Plan reviews: nothing changes there -----------------------------------------------------------------------------------------------------------------------
 check('a plan has no decisions', (function()
   local feedback = require('walkthrough.feedback')

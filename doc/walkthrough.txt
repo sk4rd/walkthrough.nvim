@@ -266,7 +266,9 @@ Write
   `:Walkthrough change [text]`
                               the same for a change request: the thread is
                               collected, nothing is sent until `send`. The
-                              agent answers with a proposal.
+                              agent answers with a proposal. On lines that
+                              carry a question thread, that thread becomes a
+                              change request.
   `:Walkthrough send`         send everything not delivered yet, in all
                               commits of the repository, as one message:
                               change requests, collected replies and your
@@ -594,9 +596,13 @@ Kinds:
                all of them. The agent replies with a proposal.
 
 Writing again on lines that carry a thread of yours adds your message to that
-thread, whatever its kind and whichever key you use (`Pa`, `Pc`, or `r` in the
-thread float):
+thread, whichever key you use (`Pa`, `Pc`, or `r` in the thread float):
 
+  - A change request (`Pc`) written in a question thread makes the thread a
+    change request: the input is titled `Change request in t1`, the message is
+    collected, and after `send` the agent replies with a proposal. The
+    question and its answer stay in the thread. A question (`Pa`) written in a
+    change request stays a reply in it.
   - In a thread with a proposal it asks for another proposal. A decision you
     marked on it and did not send is cleared. `send` tells the agent to revise
     its proposal: to reply with a new proposal (`answer` with `proposal`) and

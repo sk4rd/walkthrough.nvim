@@ -226,12 +226,13 @@ check('reply: the last user message and the last answer are drawn', virt('^» t1
   and H.marks(function(d)
     return d.virt_lines and d.virt_lines[2] and d.virt_lines[2][1][1]:match('↳ because') ~= nil
   end, vim.fn.bufnr(a)) == 1)
--- A change request on a question's lines is a reply too.
+-- A change request on a question's lines goes into the thread, which becomes
+-- a change request: collected, not sent (decision_spec.lua has the details).
 answer = 'via change'
 at(3)
 w.change()
-check('reply: change on the lines of a question replies in it (and is sent: it is a question)', #threads() == 1
-  and #q.messages == 4 and q.messages[4].text == 'via change' and #sent == 3, vim.inspect(threads()))
+check('reply: change on the lines of a question makes the thread a change request, collected', #threads() == 1
+  and #q.messages == 4 and q.messages[4].text == 'via change' and q.kind == 'change' and #sent == 2, vim.inspect(threads()))
 -- A change thread: a reply to it is collected, even when written with ask.
 at(9)
 w.change('rename it')
@@ -240,7 +241,7 @@ w.ask('and add a test')
 local c = th('t2')
 check('reply: ask on the lines of a change request replies in it', #threads() == 2 and #c.messages == 2 and c.messages[2].text == 'and add a test',
   vim.inspect(threads()))
-check('reply: ... collected, not sent', #sent == 3 and c.state == 'draft' and c.sent == 0)
+check('reply: ... collected, not sent', #sent == 2 and c.state == 'draft' and c.sent == 0)
 -- A closed thread is continued, not replaced by a new one (decision_spec.lua
 -- has the details).
 send('patch', { thread = 't2', answer = 'done it', done = true })
