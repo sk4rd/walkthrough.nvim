@@ -38,9 +38,15 @@ local tables = {
   { 'step fields', tour.step_fields },
   { 'note fields', tour.note_fields },
   { 'hunk fields', tour.hunk_fields },
-  { 'check fields', tour.check_fields },
   { 'verdicts', tour.verdicts },
   { 'evidence values', tour.evidence },
+  { 'thread states', tour.thread_states },
+  { 'thread kinds', tour.thread_kinds },
+  { 'inbox item kinds', require('walkthrough.feedback').inbox_kinds },
+  { 'thread patch fields', tour.thread_patch_fields },
+  { 'commit message patch fields', tour.commit_patch_fields },
+  { 'decisions', tour.decisions },
+  { 'depths', tour.depths },
 }
 for _, t in ipairs(tables) do
   covers(t[1], t[2], help, 'doc/walkthrough.txt')
@@ -52,6 +58,12 @@ for _, t in ipairs(tables) do
   check(t[1] .. ': the table has entries', next(t[2]) ~= nil)
 end
 check('the format knows the new verdict and a known evidence value', tour.verdicts.moved and tour.evidence.ran)
+-- The field `total` is gone from the protocol, and so from both documents' field tables.
+check('no step field total', tour.step_fields.total == nil)
+check('every inbox item kind is one of the five', vim.deep_equal(names(require('walkthrough.feedback').inbox_kinds),
+  { 'change', 'commit', 'decision', 'map', 'question' }))
+check('every thread state is one of the seven', vim.deep_equal(names(tour.thread_states),
+  { 'accepted', 'answered', 'declined', 'done', 'draft', 'proposed', 'waiting' }))
 
 -- Subcommands: whatever :Walkthrough completes.
 local subcommands = vim.fn.getcompletion('Walkthrough ', 'cmdline')
@@ -120,5 +132,8 @@ check('SKILL.md name is the directory name', front and front:match('\nname: walk
 local desc = front and front:match('description: ([^\n]+)')
 check('SKILL.md description is 1 to 1024 characters', desc ~= nil and #desc >= 1 and #desc <= 1024)
 check('SKILL.md stays short', #vim.split(skill, '\n', { plain = true }) <= 170)
+-- The agent's skill names every kind of item the inbox lists, and the README every option.
+covers('inbox item kinds', require('walkthrough.feedback').inbox_kinds, skill, 'SKILL.md')
+covers('setup options', options, read('README.md'), 'README.md')
 
 H.finish()
