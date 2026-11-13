@@ -1,32 +1,66 @@
 # walkthrough.nvim
 
-Review code changes you didn't write by hand, one feature at a time, and
-turn each feature into a clean commit. [Claude Code](https://claude.com/claude-code)
-drives annotated tours of the diff in Neovim: highlighted code on the left,
-an explanation panel on the right, numbered notes on the lines that matter.
-You read, ask, approve by staging, and commit.
+Review code changes you did not write by hand, one feature at a time, and
+turn each feature into a clean commit. A coding agent explains the diff as
+annotated tours inside Neovim. You read, ask, answer questions, and approve
+a feature by staging it.
 
-The repository has two halves:
+## What a review looks like
 
-| Path | What |
-|---|---|
-| `lua/walkthrough/` | the Neovim plugin: highlights, notes, panel, diff overlay, staging |
-| `claude/skills/walkthrough/` | the Claude side: the `/walkthrough` skill, `tour.sh`, `commit-check.sh`, a hook |
+1. **Map.** You ask your agent to review the changes (with Claude Code:
+   `/walkthrough`). The agent sorts the diff by intent into groups, one
+   group per commit, and proposes an order.
+2. **Tour.** The agent sends a group to Neovim. Each step opens a file, marks
+   the lines it is about, draws the uncommitted diff over the code and shows
+   numbered notes and an explanation in a panel. Page with `]w` and `]n`
+   (see [Keys](#keys)).
+3. **Ask and comment.** Press `a` in the panel, or run `:Walkthrough ask`, to
+   ask about a note. Run `:Walkthrough comment` to write a question, an issue
+   or a suggestion on any line. `:Walkthrough send` gives them to the agent,
+   which answers in place, next to the code.
+4. **Check.** Important steps carry a question about intent or a failure mode.
+   Think first, answer with `e`, then reveal the answer with `r`.
+5. **Decide.** Each note has a verdict (`KEEP`, `SIMPLIFY`, `REMOVE`, `MOVED`)
+   and an evidence label (`ran`, `read`, `opinion`). `:Walkthrough decide
+   accept` or `reject` tells the agent what you think of it.
+6. **Stage.** `:Walkthrough stage` stages exactly the lines of this group
+   ([`git add`](https://git-scm.com/docs/git-add)), even when another group
+   changed the same file. Green lines become muted lines with a check mark.
+7. **Commit check.** The agent runs `commit-check.sh`. It tests exactly what is
+   staged, in a temporary copy of the index, and says whether a failure is new
+   or was there before.
+8. **Commit.** You commit, then take the next group.
 
-Claude talks to Neovim over its server socket (`nvim --server … --remote-expr`).
+**Incremental variant**, while the agent is still working: the agent runs
+`tour.sh --snapshot` at the start and after each chunk you reviewed
+(`:Walkthrough reviewed` does the same from Neovim). Tours then use
+`"diff": "refs/walkthrough/reviewed"` and show only what changed since.
+See `:help walkthrough-incremental`.
 
 ## Requirements
 
-- Neovim 0.10+
-- [gitsigns.nvim](https://github.com/lewis6991/gitsigns.nvim) for staging
-- [claudecode.nvim](https://github.com/coder/claudecode.nvim) to ask Claude about a note (optional)
-- `git`, `jq`; `nix` for the build part of the commit check (optional)
+- Neovim 0.10 or newer, and `git`.
+- [gitsigns.nvim](https://github.com/lewis6991/gitsigns.nvim) for staging,
+  rejecting and the staged counter.
+- Optional: [claudecode.nvim](https://github.com/coder/claudecode.nvim) to send
+  requests to Claude Code; `jq` for the Claude Code hook; `nix` for the Nix
+  example of the commit check.
+
+`:checkhealth walkthrough` shows what is missing.
 
 ## Install
 
-### Neovim plugin
+### The plugin
 
-With Nix (flake input, no flake inside this repo):
+With any plugin manager. For example with
+[lazy.nvim](https://github.com/folke/lazy.nvim):
+
+```lua
+{ 'sk4rd/walkthrough.nvim', dependencies = { 'lewis6991/gitsigns.nvim' },
+  opts = { keys = true } }
+```
+
+With Nix, as a flake input without a flake of its own:
 
 ```nix
 # flake.nix
@@ -42,25 +76,29 @@ plugins = [
 ];
 ```
 
-Or any plugin manager. `setup()` is optional:
+`setup()` is optional. The options are in the table below.
 
-```lua
-require('walkthrough').setup({
-  panel_side = 'left', -- panel left of the code (default) or 'right'
-  panel_width = 70,
-  panel_min_width = 30, -- the panel never shrinks below this
-  code_min_ratio = 0.5, -- the code window keeps at least half the screen
-})
+### The skill
+
+The agent side is a skill in the [Agent Skills](https://agentskills.io/specification)
+layout: `skills/walkthrough/` with `SKILL.md`, `references/`, `tour.sh` and
+`commit-check.sh`. Link that directory into the skills directory of your
+agent. For Claude Code:
+
+```sh
+ln -s "$PWD/skills/walkthrough" ~/.claude/skills/walkthrough
 ```
 
-The default layout is `[ Claude | panel | code ]`, with the explanation in
-the middle. For that, open the Claude terminal on the left, e.g. in
-claudecode.nvim: `terminal = { split_side = 'left' }`.
+The old path `claude/skills/walkthrough` is a symlink to it and still works.
 
-### Claude side
+`references/preferences.md` holds the author's teaching style (learner level,
+panel template, link sources, a notes file). `SKILL.md` tells the agent to
+read it. Replace it with your own.
 
-Link `claude/skills/walkthrough` to `~/.claude/skills/walkthrough`, then add
-the hook to `~/.claude/settings.json`:
+Optional, Claude Code only: `skills/walkthrough/hooks/visual-mode.sh` is a
+`UserPromptSubmit` hook that tells Claude on each prompt of a walkthrough
+session whether Neovim is reachable. Without it the skill runs
+`tour.sh --status` itself. To use it, add to `~/.claude/settings.json`:
 
 ```json
 { "hooks": { "UserPromptSubmit": [ { "hooks": [ {
@@ -70,42 +108,69 @@ the hook to `~/.claude/settings.json`:
 } ] } ] } }
 ```
 
-The hook tells Claude on every prompt of a walkthrough session whether a
-Neovim with the plugin is reachable, so it opens tours instead of
-explaining in chat.
+## Setup options
 
-### Keys
+| Option | Default | Meaning |
+|---|---|---|
+| `panel_side` | `'left'` | `'left'` or `'right'` of the code. Left gives `[ agent \| panel \| code ]` |
+| `panel_width` | `70` | width of the panel |
+| `panel_min_width` | `30` | the panel never shrinks below this |
+| `code_min_ratio` | `0.5` | the code window keeps at least this share of the screen |
+| `max_removed_lines` | `10` | deleted lines shown per hunk before `… N more` |
+| `sender` | `'auto'` | `'auto'`, `'claudecode'`, `'terminal'`, `'clipboard'` or `function(msg)` |
+| `terminal_pattern` | `{ 'claude', 'codex', 'opencode', 'gemini', 'aider', 'amp' }` | which terminal buffer is the agent (the default list matches `amp` as a whole word) |
+| `state_dir` | `stdpath('state') .. '/walkthrough'` | where the review is saved |
+| `keys` | `false` | `true` maps the [suggested keys](#keys) that are still free |
 
-The plugin defines no global keys (the panel's `<CR>` and `a` are local to
-it). Suggested mappings:
+## Commands
 
-```lua
-local w = function(fn, ...) local a = { ... } return function() require('walkthrough')[fn](unpack(a)) end end
-vim.keymap.set('n', ']w', w('step', 1), { desc = 'Next walkthrough step' })
-vim.keymap.set('n', '[w', w('step', -1), { desc = 'Previous walkthrough step' })
-vim.keymap.set('n', ']n', w('note', 1), { desc = 'Next walkthrough note' })
-vim.keymap.set('n', '[n', w('note', -1), { desc = 'Previous walkthrough note' })
-vim.keymap.set('n', '<leader>an', w('ask_line'), { desc = 'Ask Claude about the note on this line' })
-vim.keymap.set('n', '<leader>gw', w('stage_group'), { desc = 'Stage walkthrough group in file' })
-vim.keymap.set('n', '<leader>aw', w('close'), { desc = 'Close walkthrough' })
-```
+`:Walkthrough {subcommand}`, with completion.
 
-To let gitsigns' own staging register new files first (`git add -N`), wrap
-it: `require('walkthrough').with_tracked(0, function() gitsigns.stage_hunk() end)`.
+| Subcommand | Does |
+|---|---|
+| `next`, `prev`, `back` | move between steps; `back` shows the current step again |
+| `note-next`, `note-prev` | jump between notes |
+| `group [name\|next\|prev\|n]` | switch between loaded tours, or list them |
+| `ask` | ask the agent about the note on this line |
+| `comment [question\|issue\|suggestion] [text]` | comment on this line, or on a range or selection |
+| `comment-delete` | delete the comment here |
+| `decide accept\|reject\|clear` | your stance on the verdict of this note |
+| `send` | send new comments, decisions and check answers to the agent |
+| `explain simpler\|deeper` | ask for a rewrite; the agent writes later steps at that level |
+| `check reveal\|answer` | show the answer of the step's check, or type yours |
+| `stage [all]` | stage the group in this file, or in every file of the tour |
+| `reject` | discard the group's unstaged lines in this file (asks first) |
+| `base` | show the file as it was before the change, in a float |
+| `reviewed [name]` | record the working tree as `refs/walkthrough/<name>` |
+| `status` | one line about the review |
+| `resume`, `discard`, `close` | bring back, delete or forget the saved review |
 
-## Workflow
+## Keys
 
-1. In Neovim, start Claude (claudecode.nvim) and run `/walkthrough`,
-   optionally with a scope: `/walkthrough the vpn changes`.
-2. Claude groups the changes by feature and suggests an order. Each group
-   becomes one commit.
-3. Claude opens a group as a tour. Page with `]w` / `[w` and `]n` / `[n`.
-4. Ask about a note with `<leader>an` (or `a` in the panel). For SIMPLIFY /
-   REMOVE notes the request is typed for you; edit it and press Enter.
-5. Approve by staging: `<leader>gw` stages exactly this group's lines in the
-   file. Green turns to muted ✓.
-6. Run the commit check (`claude/skills/walkthrough/commit-check.sh`): what
-   is staged, then a build of every NixOS host from exactly the index. Commit.
+The plugin defines no global key by default. It defines `<Plug>` mappings:
+`<Plug>(walkthrough-next)`, `-prev`, `-note-next`, `-note-prev`, `-ask`,
+`-comment`, `-send`, `-stage` and `-close`. With `keys = true`, `setup()`
+maps these keys, each only if it is still free:
+
+| Key | Does |
+|---|---|
+| `]w` `[w` | next / previous step |
+| `]n` `[n` | next / previous note |
+| `<leader>an` | ask |
+| `<leader>ac` | comment (normal and visual mode) |
+| `<leader>as` | send |
+| `<leader>gw` | stage |
+| `<leader>aw` | close |
+
+Or map them yourself: `vim.keymap.set('n', ']w', '<Plug>(walkthrough-next)')`.
+
+In the panel: `<CR>` jumps to the note under the cursor, or opens a
+`path:line`; `a` asks; `-` and `+` ask for a simpler or deeper explanation;
+`r` and `e` reveal and answer the check.
+
+The default layout is `[ agent | panel | code ]`: the panel sits left of the
+code, next to an agent terminal on the far left. For claudecode.nvim that is
+`terminal = { split_side = 'left' }`.
 
 ## What you see
 
@@ -113,23 +178,47 @@ it: `require('walkthrough').with_tracked(0, function() gitsigns.stage_hunk() end
 |---|---|
 | blue `▎` bar | the lines this step is about |
 | green line | change of this group, not staged |
-| muted line + `✓` | change of this group, staged |
-| red / grey `- old line` | deleted line, unstaged / staged |
-| `·` + `→ group` | change of another group: leave it |
-| `?` + `not in any group` | change the grouping missed |
-| `⚠ mixed hunk` | one git hunk mixes groups: stage with `<leader>gw` or by selection |
-| `1`, `KEEP`, `SIMPLIFY`, `REMOVE`, `DONE` | note number and verdict |
+| muted line and `✓` | change of this group, staged |
+| `- old line` (red, or grey when staged) | deleted line |
+| `·` and `→ group` | change of another group: leave it |
+| `?` and `not in any group` | change the grouping missed |
+| `?` and `stale range` | an edit cut into the range; the agent must update it |
+| `⚠ mixed hunk` | one git hunk mixes groups: use `:Walkthrough stage` |
+| number, `KEEP` `SIMPLIFY` `REMOVE` `DONE` | note number and verdict |
+| `MOVED` (grey) | the code was only relocated, not changed |
+| `ran` `read` `opinion` | how the agent knows what the note says |
+| `(code changed)` | the line of the note was rewritten after the note was written |
+| `» c1 question: …` and `↳ …` | your comment and the agent's answer |
+| `✓ accepted` `✗ rejected` | your decision on a verdict |
 
-`:help walkthrough` has the full reference, including the step format.
+## Using another agent than Claude Code
+
+The tour side needs only a shell: `tour.sh` talks to Neovim's socket. Any
+agent that can run commands and read `SKILL.md` can drive it.
+
+- **Sending to the agent:** `sender` chooses how `ask`, `send` and `explain`
+  reach it. `'terminal'` pastes into an agent running in a Neovim terminal
+  buffer, `'clipboard'` copies, a function can do anything.
+- **Pulling instead:** `tour.sh --inbox` prints what you wrote (comments,
+  decisions, check answers) as JSON, so an agent without an editor
+  integration can poll it. `--inbox --all` also lists open comments that were
+  sent before.
 
 ## Tests
 
 ```sh
-tests/run.sh
+tests/run.sh       # the plugin, in headless Neovim; needs gitsigns.nvim
+tests/scripts.sh   # tour.sh, commit-check.sh and the hook
 ```
 
-Runs headless in a throwaway git repository. The staging tests need
-gitsigns.nvim on Neovim's packpath and are skipped without it.
+`tests/docs_spec.lua` checks that the documents name every field, verdict,
+subcommand and option the code has.
+
+## More
+
+- `:help walkthrough`: the full reference (`doc/walkthrough.txt`).
+- `skills/walkthrough/references/format.md`: the protocol for the agent.
+- `skills/walkthrough/SKILL.md`: the review method.
 
 ## License
 

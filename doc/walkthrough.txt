@@ -1,130 +1,770 @@
-*walkthrough.txt*  Annotated code tours of a diff, driven by Claude Code
+*walkthrough.txt*  Review a diff as guided tours, and approve it by staging
 
 ==============================================================================
-CONTENTS                                                   *walkthrough*
+CONTENTS                                                         *walkthrough*
 
   1. Overview ............................ |walkthrough-overview|
-  2. Keys ................................ |walkthrough-keys|
-  3. Marks ............................... |walkthrough-marks|
-  4. Lua API ............................. |walkthrough-api|
-  5. Step format ......................... |walkthrough-format|
+  2. Setup options ....................... |walkthrough-setup|
+  3. Commands ............................ |walkthrough-commands|
+  4. Mappings ............................ |walkthrough-mappings|
+  5. Marks and highlight groups .......... |walkthrough-marks|
+  6. Lua API ............................. |walkthrough-api|
+  7. The format: tour, step, note ........ |walkthrough-format|
+  8. Patches ............................. |walkthrough-patch|
+  9. status() ............................ |walkthrough-status|
+ 10. inbox() ............................. |walkthrough-inbox|
+ 11. Positions and stale ................. |walkthrough-stale|
+ 12. Persistence ......................... |walkthrough-persistence|
+ 13. Senders ............................. |walkthrough-senders|
+ 14. Incremental review .................. |walkthrough-incremental|
+ 15. The commit check .................... |walkthrough-commit-check|
+ 16. Limitations ......................... |walkthrough-limitations|
+
+This file is the reference. The README gives a first walk-through. The agent
+side has its own short copy of the format in
+`skills/walkthrough/references/format.md`. A test (`tests/docs_spec.lua`)
+checks that both files name every field, verdict and evidence value that the
+code accepts.
 
 ==============================================================================
-1. OVERVIEW                                       *walkthrough-overview*
+1. OVERVIEW                                                *walkthrough-overview*
 
-An outside process (Claude Code) sends tours over Neovim's server socket:
+walkthrough.nvim shows a coding agent's explanation of a diff inside Neovim.
+The agent sorts the changes by intent into "groups". One group is one
+feature, meant to become one commit. The agent sends each group as a "tour",
+which is a list of "steps". A step opens one file, marks the lines it is
+about, draws the uncommitted diff over the code, adds numbered notes on the
+lines that matter, and fills a panel with the explanation.
 
-    nvim --server $NVIM --remote-expr "v:lua.require'walkthrough'.load('/tmp/tour.json')"
+You read, ask questions, write comments, answer check questions, and approve
+a group by staging its lines (`git add`, see
+https://git-scm.com/docs/git-add). Then you commit.
 
-A tour opens a file in the code window, marks the focus lines, overlays the
-uncommitted diff, adds numbered notes and fills a panel on the right. The
-`claude/skills/walkthrough/tour.sh` script finds the socket and sends tours.
+The agent talks to Neovim over its server socket, with |--remote-expr|:
 
-The plugin defines no global keys; see the README for suggested mappings.
+>
+    nvim --server $NVIM --remote-expr \
+      "v:lua.require'walkthrough'.load('/tmp/tour.json')"
+<
 
-                                                     *walkthrough-setup*
-setup({opts}) is optional:
+|v:lua| calls a Lua function from an expression. The script
+`skills/walkthrough/tour.sh` finds the socket and does this for you. It uses
+`$WALKTHROUGH_NVIM`, else `$NVIM` (Neovim sets it inside its terminal
+buffers), else the only `nvim.*.0` socket in `$XDG_RUNTIME_DIR`.
 
-  panel_side    "left" (default) or "right": side of the code window the
-                panel opens on. "left" suits a Claude terminal on the far
-                left: [ Claude | panel | code ].
-  panel_width   width of the panel, default 70.
-  code_min_ratio
-                share of the screen the code window always keeps, default
-                0.5. Re-applied after every tour update, when windows open
-                or are resized (e.g. the Claude terminal), and when the
-                screen size changes. The space comes from the panel first.
-  panel_min_width
-                the panel never shrinks below this, default 30; beyond it
-                the other windows give up the space.
+The plugin defines the command `:Walkthrough` and the |<Plug>| mappings. It
+defines no global key unless you pass `keys = true` to setup().
+
+Requirements: Neovim 0.10 or newer, and `git`. Staging, rejecting and the
+staged counter need https://github.com/lewis6991/gitsigns.nvim .
+`:checkhealth walkthrough` (|:checkhealth|) reports what is missing.
 
 ==============================================================================
-2. KEYS                                               *walkthrough-keys*
+2. SETUP OPTIONS                                                *walkthrough-setup*
 
-Suggested mappings (see README):
+setup({opts}) is optional. It raises an error for an invalid `panel_side`,
+`code_min_ratio` or `sender`. Options survive loading the module again.
+
+>lua
+    require('walkthrough').setup({
+      panel_side = 'left',
+      keys = true,
+    })
+<
+
+  `panel_side`       "left" (default) or "right": the side of the code window
+                     where the panel opens. "left" suits an agent terminal on
+                     the far left: [ agent | panel | code ].
+  `panel_width`      Width of the panel in columns. Default 70.
+  `panel_min_width`  The panel never shrinks below this to make room for
+                     the code. Default 30.
+  `code_min_ratio`   The code window keeps at least this share of the screen
+                     (a number above 0 and below 1). Default 0.5. It is
+                     applied again after each tour update, when a window
+                     opens or is resized, and when the screen size changes.
+                     The space comes from the panel first, down to
+                     `panel_min_width`, then from the other windows.
+  `max_removed_lines`
+                     Deleted lines shown under one hunk before "... N more
+                     removed lines". Default 10.
+  `sender`           How requests reach the agent: "auto" (default),
+                     "claudecode", "terminal", "clipboard", or a function.
+                     See |walkthrough-senders|.
+  `terminal_pattern` Which terminal buffer is the agent, for the "terminal"
+                     sender. A list of Lua patterns, one pattern, or a
+                     function. See |walkthrough-senders|. Default: "claude",
+                     "codex", "opencode", "gemini", "aider" and "amp" (as a
+                     whole word).
+  `state_dir`        Where the review state is saved, one file per
+                     repository. Default: |stdpath()| "state" followed by
+                     "/walkthrough". See |walkthrough-persistence|.
+  `keys`             `true` maps the suggested keys that are still free. See
+                     |walkthrough-mappings|. Default `false`.
+
+==============================================================================
+3. COMMANDS                                                  *walkthrough-commands*
+
+`:Walkthrough {subcommand} [argument]` is the only command. Subcommands
+complete with <Tab>. An unknown one lists the valid names.
+
+Move
+  `:Walkthrough next`         next step.
+  `:Walkthrough prev`         previous step.
+  `:Walkthrough back`         show the current step again (use it after you
+                              opened another file in the code window).
+  `:Walkthrough note-next`    jump to the next note below the cursor. The panel
+                              scrolls to its section.
+  `:Walkthrough note-prev`    jump to the previous note.
+  `:Walkthrough group [x]`    switch between loaded tours. `x` is a group name,
+                              "next", "prev", or a number to move by (it
+                              wraps). Without `x` it lists the loaded tours.
+                              A tour shows the step where you left it.
+  `:Walkthrough base`         open the file as it was before the change, in a
+                              read-only float, on the line of the step's
+                              focus start. The reference is the step's `diff`
+                              ref, else HEAD. `q` or <Esc> closes the float.
+
+Decide
+  `:Walkthrough stage`        stage the lines of the reviewed group in the
+                              file of the current step (|walkthrough-stage|).
+  `:Walkthrough stage all`    the same in every file of the tour. It asks
+                              first if some steps were not shown yet.
+  `:Walkthrough reject`       discard the unstaged lines of the reviewed group
+                              in the current file, after a confirmation.
+                              Staged lines stay. It cannot be undone.
+  `:Walkthrough decide {x}`   `x` is "accept", "reject" or "clear": your stance
+                              on the verdict of the note under the cursor (on
+                              its line in the code, or on its heading in the
+                              panel).
+
+Talk to the agent
+  `:Walkthrough ask`          send the note on the cursor line (or the line
+                              itself) to the agent, with its context.
+  `:Walkthrough comment [type] [text]`
+                              write a comment on the cursor line, or on the
+                              lines of a range (`:'<,'>Walkthrough comment`).
+                              `type` is "question" (the default), "issue" or
+                              "suggestion". Without text it asks for it. The
+                              file must be saved.
+  `:Walkthrough comment-delete`
+                              delete the comment on this line, or the one
+                              under the cursor in the panel.
+  `:Walkthrough send`         send everything not sent yet as one message:
+                              comments, decisions on notes, answers to checks.
+  `:Walkthrough explain {x}`  `x` is "simpler" or "deeper": ask the agent to
+                              rewrite the note under the cursor (else the
+                              step) at that level. The tour remembers the
+                              level as `depth` (|walkthrough-status|).
+  `:Walkthrough check {x}`    `x` is "reveal" (show the answer of the step's
+                              check) or "answer" (type your own answer; it
+                              goes out with the next send).
+
+Session
+  `:Walkthrough status`       one line: step, seen steps, tours loaded, stale
+                              items.
+  `:Walkthrough resume`       bring back the saved tours of this repository
+                              (|walkthrough-persistence|).
+  `:Walkthrough discard`      delete the saved state of this repository and
+                              clear the screen.
+  `:Walkthrough close`        remove all marks, close the panel, forget the
+                              loaded tours. What is saved on disk stays.
+  `:Walkthrough reviewed [name]`
+                              record the working tree as the point you have
+                              reviewed (|walkthrough-incremental|). The default
+                              name is "reviewed". It notifies with the short
+                              commit id.
+
+==============================================================================
+4. MAPPINGS                                                  *walkthrough-mappings*
+
+The plugin defines these |<Plug>| mappings (normal mode; `comment` also in
+visual mode, where it covers the selected lines):
+
+  <Plug>(walkthrough-next)         next step
+  <Plug>(walkthrough-prev)         previous step
+  <Plug>(walkthrough-note-next)    next note
+  <Plug>(walkthrough-note-prev)    previous note
+  <Plug>(walkthrough-ask)          ask the agent about this line's note
+  <Plug>(walkthrough-comment)      comment on this line or selection
+  <Plug>(walkthrough-send)         send comments, decisions and answers
+  <Plug>(walkthrough-stage)        stage the group in this file
+  <Plug>(walkthrough-close)        close the tour
+
+With `keys = true`, setup() maps these keys, each one only when it is still
+free (a key that you or another plugin mapped is left alone):
 
   ]w  [w            next / previous step
-  ]n  [n            next / previous note; the panel scrolls along
-  <leader>an        ask Claude about the note on this line
-  <leader>gw        stage this group's changes in the file
-  <leader>aw        close the tour
+  ]n  [n            next / previous note
+  <leader>an        ask
+  <leader>ac        comment (normal and visual mode)
+  <leader>as        send
+  <leader>gw        stage
+  <leader>aw        close
 
-In the panel:                                        *walkthrough-panel*
+Without `keys`, map them yourself:
 
-  <CR>              on a `### [n]` heading: jump the code to note n
-  a                 on a heading: ask Claude about note n; elsewhere: about
-                    the step's focus lines
+>lua
+    vim.keymap.set('n', ']w', '<Plug>(walkthrough-next)')
+<
+
+Keys in the panel (local to its buffer):
+
+  <CR>      on a `### [n]` heading: move the code to note n. On a
+            `path:line` text: open that file at that line in the code
+            window.
+  a         ask the agent about the note under the cursor, else about the
+            step's focus lines.
+  -         ask for a simpler explanation (like `:Walkthrough explain simpler`)
+  +  =      ask for a deeper explanation
+  r         reveal the answer of the check (only while the step has a check)
+  e         write your answer to the check (only while the step has a check)
+
+The panel's winbar shows `Step n/total`, the group, `seen a/b`, `staged x/y`,
+the title, and the keys that are mapped. It adds "unsaved changes: save to
+refresh" while the code buffer is modified.
 
 ==============================================================================
-3. MARKS                                             *walkthrough-marks*
+5. MARKS AND HIGHLIGHT GROUPS                                    *walkthrough-marks*
 
   blue bar in the sign column     the lines this step is about
-  green line                      change of the reviewed group, unstaged
-  muted line + ✓                  change of the reviewed group, staged
-  red / grey "- old line"         deleted line, unstaged / staged
-  · and "→ group"                 change of another group
-  ? and "not in any group"        change in no group's range
-  "⚠ mixed hunk"                  one unstaged git hunk spans several groups
-  number badge, verdict badge     note number; KEEP SIMPLIFY REMOVE DONE
+  green line                      change of the reviewed group, not staged
+  muted line and ✓                change of the reviewed group, staged
+  red or grey "- old line"        deleted line, not staged or staged. Drawn as
+                                  virtual lines, at most `max_removed_lines`
+  "·" and "→ group"               change of another group: leave it
+  "?" and "not in any group"      change in no group's range
+  "?" and "stale range"           a range of `hunks` that an edit cut into
+                                  (|walkthrough-stale|)
+  "⚠ mixed hunk"                  one unstaged git hunk spans several groups;
+                                  stage by selection or with `stage`
+  number badge                    the note's number
+  KEEP SIMPLIFY REMOVE DONE MOVED the note's verdict (|walkthrough-verdicts|)
+  ran / read / opinion            the note's `evidence`
+  "✓ accepted" / "✗ rejected"     your decision on the verdict
+  "(code changed)"                the line of the note was rewritten or
+                                  deleted after the note was written
+  "» c1 question: text"           your comment, under its last line. The
+                                  agent's answer follows as "↳ text". A
+                                  resolved comment is dimmed.
 
-Highlight groups (link or override them): WalkthroughRange, WalkthroughBar,
-WalkthroughNote, WalkthroughAdded, WalkthroughRemoved, WalkthroughStaged,
-WalkthroughStagedSign, WalkthroughStagedRemoved, WalkthroughOther,
-WalkthroughUnassigned. Badges (WalkthroughBadge, WalkthroughKeep,
-WalkthroughSimplify, WalkthroughRemove, WalkthroughMixed,
-WalkthroughUnassignedLabel) are derived from the diagnostic colors.
+Highlight groups (|highlight-groups|; a colorscheme or your config can override
+them). Plain links: WalkthroughRange (Visual), WalkthroughBar and
+WalkthroughNote (DiagnosticInfo), WalkthroughAdded (DiffAdd),
+WalkthroughRemoved (DiffDelete), WalkthroughStaged (CursorLine),
+WalkthroughStagedSign (DiagnosticOk), WalkthroughStagedRemoved,
+WalkthroughOther, WalkthroughEvidence and WalkthroughCommentResolved
+(Comment), WalkthroughUnassigned (DiagnosticWarn), WalkthroughComment
+(DiagnosticHint).
+
+Badges are computed: the foreground colour of another group becomes the
+badge background, and the Normal background becomes its text. They are
+computed again when the colorscheme changes. WalkthroughBadge
+(DiagnosticInfo), WalkthroughKeep and WalkthroughAccepted (DiagnosticOk),
+WalkthroughSimplify, WalkthroughMixed and WalkthroughUnassignedLabel
+(DiagnosticWarn), WalkthroughRemove and WalkthroughRejected
+(DiagnosticError), WalkthroughMoved (Comment).
 
 ==============================================================================
-4. LUA API                                             *walkthrough-api*
+6. LUA API                                                      *walkthrough-api*
 
-All socket entry points return "ok" or "error: ..." instead of raising.
+>lua
+    local w = require('walkthrough')
+<
 
-  setup({opts})        layout options, see |walkthrough-setup|
-  load({path})         show a step or tour from a JSON file
-  patch({path})        change parts of the tour in place, see
-                       |walkthrough-patch|
-  status()             current step as JSON: {"step":2,"total":5,...}
-  step({delta})        move through the tour (-1, 1)
-  note({delta})        jump to the previous / next note
-  ask_line()           send the note on the cursor line to Claude
-  stage_group()        stage the reviewed group's ranges in the file
+Socket entry points are made for another process. They never raise. They
+return "ok", a JSON string, a commit id, or "error: <one short line>".
+
+  load({path})        show a tour or a step from a JSON file
+                      (|walkthrough-format|). A tour of a group that is
+                      loaded already replaces it, and keeps what you did
+                      (seen steps, comments, check answers, depth).
+  patch({path})       change the tour in place (|walkthrough-patch|)
+  status()            JSON: where you are (|walkthrough-status|)
+  inbox({all})        JSON: what you wrote for the agent
+                      (|walkthrough-inbox|)
+  snapshot({name})    record the working tree as `refs/walkthrough/{name}`
+                      (|walkthrough-incremental|). Returns the commit id.
+  resume()            bring back the saved tours
+  discard()           delete the saved state and clear the screen
+  close()             clear everything, close the panel, forget the tours
+
+User entry points are made for mappings. They never raise: a problem becomes
+a notification (|vim.notify()|).
+
+  setup({opts})       options (|walkthrough-setup|). This one raises on
+                      invalid options.
+  step({delta})       -1 previous, 1 next, 0 show the current step again
+  group({x})          switch tours (see `:Walkthrough group`)
+  note({delta})       jump to the next (1) or previous (-1) note
+  ask_line()          ask about the note on the cursor line
+  stage_group({opts}) stage the group; `{ all = true }` in every file
+  reject_group()      discard the group's unstaged lines
+  comment({type}, {text}, {range})
+                      add a comment; {range} is `{ from, to }`
+  comment_delete()    delete the comment here
+  decide({x})         "accept", "reject" or "clear"
+  send()              send comments, decisions and answers
+  explain({x})        "simpler" or "deeper"
+  check({x})          "reveal" or "answer"
+  base()              the base version in a float
+
+Helpers for mappings and other plugins:
+
   with_tracked({buf}, {fn})
-                       run {fn} once git knows the file; untracked files
-                       are registered with `git add -N` first
-  clear()              remove all marks
-  close()              end the tour: marks, panel, history, winbar
+                      run {fn} once git knows the file of {buf} (0: the
+                      current buffer). An untracked file is first registered
+                      with `git add -N` (https://git-scm.com/docs/git-add).
+                      That stages no content, it only makes git see the file.
+                      An ignored file is not registered.
+  clear()             remove the plugin's marks from every buffer
+  panel({text}, {keep_cursor})
+                      show markdown text in the panel
+  annotate({line}, {text}, {n}, {verdict}, {stale}, {extra})
+                      draw one note on the current code buffer
+  keep_code_wide()    apply `code_min_ratio` now
 
-The tour state survives reloading the module.
+The tour state lives in a global table (`_G.walkthrough_state`), so it
+survives loading the module again.
+
+*walkthrough-stage*
+Staging stages exactly the lines of the reviewed group. It calls gitsigns'
+`stage_hunk` with a line range, one range after the other, and then reads
+the result back from git. It refuses when the step lists no `hunks`, when
+gitsigns is missing, when the code window shows another file, when the buffer
+has unsaved changes, or when a range of the group is stale. It reports how
+many lines were staged and what could not be staged. An untracked file is
+registered with `git add -N` first.
 
 ==============================================================================
-5. STEP FORMAT                                       *walkthrough-format*
+7. THE FORMAT                                                  *walkthrough-format*
 
-A tour: >json
-    { "group": "Feature name", "start": 1,
+A file given to load() holds one JSON object: a tour (it has `steps`) or one
+step (it is appended to the active tour; without a tour it starts an unnamed
+one). Everything is checked before anything changes. A problem comes back as
+one line, for example `error: step 2, note 1: "line" is missing`. A failed
+load changes nothing and leaves the screen as it was. An unknown field is an
+error, so a typo is reported.
+
+>json
+    { "group": "Shared LAN constants",
       "steps": [{
-        "file": "/absolute/path.nix",
-        "title": "what this step is about",
+        "file": "/home/me/project/net.nix",
+        "title": "the constants",
         "from": 10, "to": 20,
-        "hunks": [{ "from": 10, "to": 20, "group": "Feature name" },
+        "hunks": [{ "from": 10, "to": 20, "group": "Shared LAN constants" },
                   { "from": 41, "to": 41, "group": "Other feature" }],
         "notes": [{ "line": 12, "text": "few words", "verdict": "simplify",
-                    "detail": "the explanation, shown in the panel" }],
-        "panel": "markdown"
+                    "evidence": "read", "detail": "the explanation" }],
+        "panel": "markdown",
+        "check": { "question": "What happens if X is empty?",
+                   "answer": "Then ..." }
       }] }
 <
-Only `file` is required. Lines are 1-based and inclusive. `hunks` turns on
-the diff overlay (vs HEAD, staged parts muted); `"diff": "<ref>"` gives a
-plain diff against a ref instead. A lone step (no "steps") is appended to
-the current tour.
 
-                                                     *walkthrough-patch*
-A patch is one object or a list: >json
-    [{ "step": 1, "note": 3, "verdict": "done", "text": "renamed" },
-     { "step": 2, "from": 12, "to": 15, "panel": "..." },
-     { "note": 4, "line": 30, "text": "a new note" },
-     { "note": 1, "remove": true }]
+Text fields (`text`, `detail`, `panel`, `question`, `answer`, `feedback`)
+take a string, or a list of strings that are joined as lines. Line numbers
+are 1-based and inclusive, and mean the file as it is on disk now.
+
+Tour fields
+
+  `group`   string. The name of the tour, and the default `group` of its
+            steps. The group being reviewed is this one.
+  `steps`   list of steps, not empty.
+  `start`   integer, 1 or more. The step to open first. Default 1. It is
+            limited to the number of steps. Other fields at the top level
+            are ignored.
+
+Step fields (all optional except `file`)
+
+  `file`    string, required. Path of an existing, readable file. Use an
+            absolute path: a relative one is read from Neovim's working
+            directory.
+  `title`   string. Shown in the winbar.
+  `group`   string. Default: the tour's group.
+  `total`   number. The step count shown in the winbar, when it is larger
+            than the number of steps sent so far (for tours sent one step at
+            a time).
+  `from`    integer, 1 or more. First line of the focus.
+  `to`      integer, `from` or more. Last line of the focus. Needs `from`.
+  `diff`    `true`, `false` or a git ref (a string). `true` shows everything
+            uncommitted (the file against HEAD), with staged lines muted. A
+            ref gives a plain diff against that ref
+            (https://git-scm.com/docs/gitrevisions); see
+            |walkthrough-incremental|. A step that has `hunks` and no `diff`
+            gets `true`. A step with neither has no overlay.
+  `hunks`   list of hunks: every changed range of the file, by group.
+  `notes`   list of notes.
+  `panel`   text (markdown). The explanation shown in the panel.
+  `check`   a check.
+
+Hunk fields
+
+  `from`    integer, 1 or more, required. First line of the range.
+  `to`      integer, `from` or more. Last line. Default `from`.
+  `group`   string. Default: the step's group.
+
+Ranges of one step must not overlap. A change in a range of the step's group
+is "mine" and drawn in full. A change in a range of another group is dimmed
+and labelled with that group. A change in no range is flagged "not in any
+group". A deleted line has no line of its own: it counts as being on the
+line where it is shown (|walkthrough-limitations|).
+
+Note fields
+
+  `line`      integer, 1 or more, required, and not past the end of the file.
+  `text`      text. A few words, drawn under the line.
+  `detail`    text. A longer explanation. The panel shows it instead of
+              `text`.
+  `verdict`   one of the verdicts below.
+  `evidence`  one of the evidence values below.
+
+Notes are numbered 1, 2, ... in list order. The number appears in the badge
+and in the panel heading `### [n] line L`. A number is never reused and never
+changed by a patch, except when a patch replaces the whole `notes` list.
+
+*walkthrough-verdicts*
+Verdicts:
+  `keep`      the code is fine as it is.
+  `simplify`  it can be simpler; the note says how.
+  `remove`    it is not needed.
+  `done`      a simplify or remove suggestion that has been applied.
+  `moved`     the code was only relocated, not changed. Find such code with
+              `git diff -M --color-moved` (https://git-scm.com/docs/git-diff).
+
+Evidence values (how the claim in the note was established):
+  `ran`       the agent ran something that shows it.
+  `read`      the agent read the code and inferred it.
+  `opinion`   a judgement.
+
+Check fields
+
+  `question`  text, required, not empty. Shown in the panel under "Check".
+  `answer`    text. Hidden until you reveal it (`r`).
+  `feedback`  text. The agent's remark on your answer, shown under
+              "Feedback". Send it with a patch (|walkthrough-patch|).
+
+You answer with `e`. The answer goes out with `send` and appears in the
+inbox. Revealing the answer and answering are recorded, and status() reports
+them (`check`). Sending a step again with the same question keeps that
+record.
+
+Some fields are written only by the plugin, and are not valid in an agent's
+JSON: `stale`, `seen`, `comments`, `decision`, the note's `n`, and the state
+of a check (`revealed`, `reply`). A patch cannot set them either.
+
+==============================================================================
+8. PATCHES                                                       *walkthrough-patch*
+
+patch() changes the loaded tour in place. Resend only what changed. The file
+holds one patch (an object) or a list of patches. `step` is the step number
+(1-based) in the active tour. It defaults to the current step.
+
+>json
+    [{ "step": 2, "from": 12, "to": 15, "panel": "new text" },
+     { "step": 2, "unset": ["panel", "to"] },
+     { "step": 2, "note": 3, "verdict": "done", "detail": "Applied: ..." },
+     { "step": 2, "note": 4, "line": 30, "text": "a new note" },
+     { "step": 2, "note": 1, "remove": true },
+     { "step": 2, "note": 3, "unset": ["detail"] },
+     { "comment": "c1", "answer": "Because ...", "resolved": true }]
 <
-`step` defaults to the current one. The current step is redrawn without
-moving the cursor unless its file or focus changed.
+
+The forms:
+
+  Step fields     any step field of |walkthrough-format|: `file`, `title`,
+                  `total`, `from`, `to`, `diff`, `hunks`, `notes`, `panel`,
+                  `group`, `check`. A list field (`hunks`, `notes`) is
+                  replaced as a whole. Replacing `notes` numbers the new
+                  notes from 1.
+  `unset`         a list of field names to remove. In a step patch they are
+                  step fields, in a note patch note fields. It exists because
+                  JSON `null` is dropped when the file is read.
+  Note patch      has `note`, the note's number. It changes the fields it
+                  names. Giving `line` says where the note is now, and
+                  clears its "code changed" mark.
+  New note        `note` is the next free number, and `line` is given. The
+                  next free number is one above the highest number ever used
+                  in the step, also after removals. A wrong number is
+                  answered with the right one.
+  `remove`        `true` together with `note` drops the note.
+  Comment patch   has `comment`, an id such as "c1" (|walkthrough-inbox|).
+                  Allowed keys: `comment`, `step` (limits the search to that
+                  step), `answer` (text) and `resolved` (boolean). It cannot
+                  be combined with `note`. The agent may only answer and
+                  resolve a comment. Creating and deleting comments is the
+                  user's.
+  `check`         replaces the check. If the question is the same, the
+                  user's record stays. A patch may add `feedback`.
+
+The whole list is applied to copies of the steps. Every step it touched is
+validated again. If any item or the result is invalid, nothing changes
+(`error: patch 2: ...`). Before the patch, the numbers in the steps it names
+are moved to follow edits made to their files, so the agent's numbers mean
+the lines on disk now. A patch that changes `file`, `from` or `to` of the
+current step opens the step again. Any other patch redraws it without moving
+the cursor.
+
+==============================================================================
+9. STATUS()                                                     *walkthrough-status*
+
+status() returns a JSON string, or `{"step":0}` when no tour is open. It
+brings every step up to date first. Fields:
+
+  `step`    number of the current step (1-based).
+  `total`   number of steps in the active tour.
+  `title`   title of the current step, when it has one.
+  `file`    file of the current step.
+  `group`   group of the current step.
+  `seen`    how many steps of the active tour were shown to the user.
+  `groups`  one entry per loaded tour: `group` (name), `steps` (count),
+            `seen`, `current` (true for the active one) and `checks`
+            (`total`, `answered`, `revealed`, counted over its steps that
+            have a check; absent when none has).
+  `stale`   absent when nothing is stale. Otherwise a list of what edits
+            invalidated and the agent should patch:
+            `{ "step", "kind": "note", "note", "line" }`,
+            `{ "step", "kind": "hunk", "from", "to", "group" }`, or
+            `{ "step", "kind": "missing" }` (the step's file can no longer
+            be read).
+  `depth`   "simpler" or "deeper" after `explain`: the level the user asked
+            for. Absent otherwise. Write the next steps at that level.
+  `check`   the state of the current step's check: "open", "revealed" or
+            "answered". Absent when the step has none.
+
+`seen` and `check` are the only evidence of what the user read and answered.
+
+==============================================================================
+10. INBOX()                                                      *walkthrough-inbox*
+
+inbox() is the pull side of `:Walkthrough send`, for an agent that has no
+editor integration. It returns JSON for the active tour:
+`{ "group": "...", "items": [ ... ] }`, or `{"items":[]}` when no tour is
+open. Each item counts as sent afterwards, so a second call lists only what
+is new. `inbox(true)` also lists comments that were sent already and are not
+resolved. Items come in step order, comments sorted by line:
+
+  comment   `kind` "comment", `id` ("c1"), `type` ("question", "issue" or
+            "suggestion"), `step`, `file`, `from`, `to`, `text`.
+  decision  `kind` "decision", `step`, `note` (the number), `verdict`,
+            `decision` ("accept" or "reject"), `file`, `line`, `text`.
+  check     `kind` "check", `step`, `question`, `reply` (the user's answer).
+
+What is expected: a question gets a comment patch with `answer`. An issue or
+a suggestion gets a reply, and if the agent agrees it changes the code first
+and sets `resolved`. An accepted `simplify` or `remove` is applied and
+patched to `done`. A rejected decision is left alone. A reply to a check gets
+a `check` patch with `feedback`.
+
+==============================================================================
+11. POSITIONS AND STALE                                          *walkthrough-stale*
+
+A step stores line numbers, and the file keeps changing (the user edits it,
+the agent edits it). So each step also keeps a copy of the file as the
+numbers last referred to it. When a step is drawn, patched, staged or
+reported by status(), the file on disk is compared with that copy
+(|vim.diff()|, ignoring changes in whitespace) and every number is moved
+through the difference. Lines inserted above a note move it down. Nothing is
+asked of the agent.
+
+A number is marked `stale` when moving it is a guess:
+
+  note      its line was rewritten or deleted. The note is drawn with
+            "(code changed)" and the panel heading says so.
+  hunk      an edit reaches over an edge of the range. The ends are a guess,
+            the lines are labelled "stale range", and `stage` and `reject`
+            refuse until the agent patches the `hunks`. Lines inserted
+            directly before or after a range, or inside it, are no
+            conflict: the range moves or grows.
+  comment   the code it was written on was rewritten (shown as
+            "(code changed)").
+
+A range whose lines were all deleted collapses onto the line where the
+deletion is shown. If another range owns that line, the collapsed range is
+dropped. The focus (`from`, `to`) is never stale; it follows as well as it
+can.
+
+status() lists stale notes and hunks under `stale` (not comments). After an
+edit the agent runs status() and patches what is listed. A patch that gives a
+note a `line`, or replaces `hunks`, ends the stale state.
+
+The numbers follow the file on disk. While the code buffer has unsaved
+changes, the diff overlay is paused (git sees only the saved file) and the
+panel's winbar says "unsaved changes: save to refresh". Commenting, staging
+and rejecting need the file saved. The overlay redraws by itself when the
+file is written, reloaded after an outside edit, or staged.
+
+==============================================================================
+12. PERSISTENCE                                                *walkthrough-persistence*
+
+Each change to the review saves all loaded tours of the active tour's
+repository to one JSON file. Changes are: load, patch, moving to a step or
+tour, a comment, a decision, a check, a send, an explain request and a
+reject. The file is:
+
+  {state_dir}/{sha256 of the repository root}.json
+
+`state_dir` defaults to `stdpath('state') .. '/walkthrough'` (|stdpath()|).
+The file is written beside itself and renamed, so a crash leaves no half
+file. A failure to save is reported once and otherwise ignored.
+
+  `:Walkthrough resume`   reads the file of the repository of the working
+                          directory (else of the current file), brings the
+                          tours back, and shows the active one where you
+                          left it. Steps follow the edits made meanwhile. A
+                          step whose file is gone, or that no longer
+                          validates, is dropped. So is a tour whose steps all
+                          have `diff` true and whose files have no
+                          uncommitted change any more (it was committed).
+                          Without a saved review it answers "nothing to
+                          resume".
+  `:Walkthrough discard`  deletes the file and clears the screen.
+  `:Walkthrough close`    clears the screen and forgets the loaded tours; the
+                          file stays.
+
+When nothing is loaded and the repository has a saved review, the next load()
+brings the saved tours back first, so sending a group after a restart does
+not wipe the others.
+
+==============================================================================
+13. SENDERS                                                    *walkthrough-senders*
+
+A request to the agent (ask, send, explain) is built as a message and handed
+to the sender chosen by `sender`. The message is a table:
+
+  `text`     markdown for the agent.
+  `refs`     a list of `{ file, from, to }`: the code the message is about.
+  `prefill`  optional text for the prompt, typed but not submitted.
+
+The senders:
+
+  "claudecode"  needs https://github.com/coder/claudecode.nvim (the command
+                `:ClaudeCodeAdd`). It writes the text to a temporary file,
+                attaches it and the code references, focuses the Claude
+                terminal, and types the `prefill`.
+  "terminal"    pastes the text into the terminal buffer of a running agent
+                as one bracketed paste, so nothing is submitted, and moves
+                you to that window. The terminal is found by
+                `terminal_pattern`. The text is plain, with the references
+                as `path:from-to` lines.
+  "clipboard"   copies the plain text to the `+` register (to the unnamed
+                register when Neovim has no clipboard provider).
+  a function    `sender = function(msg) ... end`. It receives the message
+                table. If it raises, the items are not marked as sent.
+  "auto"        the default. "claudecode" when its command exists, else
+                "terminal" when an agent terminal is found, else
+                "clipboard". `:checkhealth walkthrough` shows the choice.
+
+`terminal_pattern` is matched against the buffer name and the terminal title,
+ignoring case. A function receives `(name, title, buf)` and returns a
+boolean. Only terminal buffers with a running job count.
+
+An agent that cannot be pushed to can pull instead: `tour.sh --inbox`
+(|walkthrough-inbox|).
+
+==============================================================================
+14. INCREMENTAL REVIEW                                       *walkthrough-incremental*
+
+To review while the agent is still working, the agent records the working
+tree at the points you have reviewed. Later tours show only what changed
+since.
+
+  snapshot({name})  or  `:Walkthrough reviewed [name]`  or
+  `tour.sh --snapshot [name]`
+
+records the working tree (tracked and untracked files, not ignored ones) as
+a commit object, and points `refs/walkthrough/{name}` at it. The default name
+is "reviewed". A name starts with a letter or digit and contains letters,
+digits, ".", "_" and "-". It must not contain "..", and must not end with "."
+or ".lock". The call returns the commit id, or `error: ...`. The repository is
+the active tour's, else the one of the working directory.
+
+Your index, your working tree, HEAD and your branches are not touched.
+Inside, the plugin does this (https://git-scm.com/docs/git-read-tree,
+https://git-scm.com/docs/git-add, https://git-scm.com/docs/git-write-tree,
+https://git-scm.com/docs/git-commit-tree,
+https://git-scm.com/docs/git-update-ref): it seeds a temporary index file
+(`GIT_INDEX_FILE`) from HEAD when HEAD exists, runs `git add -A` into it,
+makes the tree with `git write-tree`, makes a commit with `git commit-tree`
+(parent HEAD when it exists), and stores it with `git update-ref`. A
+repository without commits works. `git stash create` is not used, because it
+leaves out untracked files. If git has no author identity configured, the
+commit is made as "walkthrough".
+
+A step with `"diff": "refs/walkthrough/reviewed"` is a plain diff against
+that ref: only lines changed after the snapshot are marked. This also holds
+for a file that is untracked in the working tree. If the file is in the
+snapshot, the snapshot's copy is compared with the file. If it is not, every
+line is new. (`git diff {ref} -- {file}` cannot do this: for a file that is
+not in the index it prints the whole old file as deleted.)
+
+A step against a ref has no staged/unstaged split: no muted lines, no ✓, and
+its lines are not counted in `staged x/y`. Staging still works with `hunks`.
+
+A snapshot is an ordinary ref and the plugin never removes it. Remove one
+with `git update-ref -d refs/walkthrough/{name}`. List them with
+`git for-each-ref refs/walkthrough/`.
+
+==============================================================================
+15. THE COMMIT CHECK                                         *walkthrough-commit-check*
+
+`skills/walkthrough/commit-check.sh` tests what a commit will contain. It
+lists the staged and the not staged files, copies exactly the index into a
+temporary directory (`git checkout-index`,
+https://git-scm.com/docs/git-checkout-index) and runs a check there. Your
+working tree is not used or changed. The check is, first match wins:
+
+  1. the command in `$WALKTHROUGH_CHECK` (run with `sh -c`).
+  2. an executable file `.walkthrough/check` in the index.
+  3. if `flake.nix` exists: build every host of `nixosConfigurations`. This is
+     a Nix example. `commit-check.sh host ...` builds only those hosts.
+  4. otherwise it prints "no check defined" and exits 0.
+
+Checks 1 and 2 run with the checkout as working directory. If the check
+fails, it is run again on HEAD. That tells a new failure ("this commit breaks
+it") from an old one ("already broken"). The script exits 1 when nothing is
+staged or the check fails.
+
+To define a check for your project, write `.walkthrough/check` as an
+executable script that exits non-zero on failure, and stage it:
+
+>sh
+    #!/bin/sh
+    npm test
+<
+
+==============================================================================
+16. LIMITATIONS                                             *walkthrough-limitations*
+
+- A deleted line cannot have its own group. `hunks` address lines of the new
+  file, and a deleted line has none, so it counts as being on the line where
+  it is shown: a deletion between two lines is shown below the line before
+  the gap (above line 1 when it is at the top). Example: group A changes
+  line 4 and group B deletes the line below it. Git reports one hunk. The
+  overlay shows both as A's, gives no "mixed hunk" warning, and `stage` for A
+  stages B's deletion too. The commit check is the safety net. An agent should
+  say so in a note when it happens.
+- Neovim may not show virtual lines above line 1 (`virt_lines_above`) unless
+  the window is scrolled with filler lines. A deletion at the top of a file
+  can then be invisible in the overlay. Not checked here.
+- When a hunk replaces n old lines with m new lines and the new lines are
+  split between groups, gitsigns pairs old and new lines by position when
+  staging. That is a heuristic.
+- A deleted file cannot be a step (`file` must be readable). Write the old
+  version to a temporary file, for example `git show HEAD:path > /tmp/x`, and
+  tour that.
+- A file that is new to git cannot be rejected: git has nothing to restore
+  it to.
+- Positions follow the file on disk, so an edit that is not saved yet is
+  not seen (|walkthrough-stale|). Edits move numbers by a diff, which can
+  guess wrong when a large block is rewritten. Such notes and ranges are
+  marked stale.
+- Staging and rejecting need gitsigns.nvim, and the step's file in the code
+  window.
+- Moved code is detected by the agent only. The plugin draws a moved block
+  like any other change.
+- A snapshot is not cleaned up automatically. It keeps the objects of the
+  files it recorded, so a large untracked tree takes space until `git gc`.
+- The panel and the overlay belong to one tab. A tour left open in another
+  tab does not draw there.
 
  vim:tw=78:ts=8:ft=help:norl:
