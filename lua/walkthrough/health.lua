@@ -20,7 +20,7 @@ function M.check()
   if pcall(require, 'gitsigns') then
     h.ok('gitsigns.nvim found (staging by line range)')
   else
-    h.warn('gitsigns.nvim not found: stage_group cannot stage', 'Install lewis6991/gitsigns.nvim')
+    h.warn('gitsigns.nvim not found: staging is not possible', 'Install lewis6991/gitsigns.nvim')
   end
 
   if vim.fn.exists(':ClaudeCodeAdd') == 2 then

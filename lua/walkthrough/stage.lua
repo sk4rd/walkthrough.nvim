@@ -4,6 +4,7 @@ local git = require('walkthrough.git')
 local ui = require('walkthrough.ui')
 local tour = require('walkthrough.tour')
 local tours = require('walkthrough.tours')
+local compact = require('walkthrough.compact')
 
 local M = {}
 
@@ -83,6 +84,81 @@ local function unstaged_now(buf)
   return git.unstaged_set(hunks, vim.api.nvim_buf_line_count(buf))
 end
 
+-- What gitsigns believes is unstaged in the buffer, in the shape of
+-- `unstaged_now` (line set, shown deletions); nil when it has no hunks to
+-- tell (not attached, or its cache was dropped and not rebuilt yet).
+local function gitsigns_view(buf, gitsigns)
+  local ok, hunks = pcall(gitsigns.get_hunks, buf)
+  if not ok or not hunks then
+    return nil
+  end
+  local converted = {}
+  for _, h in ipairs(hunks) do
+    local removed = {}
+    for i = 1, h.removed.count do
+      removed[i] = true
+    end
+    table.insert(converted, { start = h.added.start, count = h.added.count, removed = removed })
+  end
+  local lines, removed = git.unstaged_set(converted, vim.api.nvim_buf_line_count(buf))
+  return lines, removed
+end
+
+-- gitsigns stages and resets from its own cache of the buffer's hunks (the
+-- buffer against the index). That cache is dropped when HEAD or the index
+-- change under it (a commit, a reset, another git process) and is rebuilt
+-- only while a window shows the buffer (gitsigns' manager.update), in the
+-- background. Its status counters stay as they were meanwhile, so
+-- `await_attached` cannot tell, and a `stage_hunk` run before the rebuild
+-- finds no hunk and stages nothing. So before gitsigns is asked to change
+-- anything, wait until what it has agrees with what git reports, asking it
+-- to read the buffer again (its `refresh`) when it does not. Calls
+-- `done(true)` when they agree, `done(false)` after about 5 seconds when
+-- they do not. Never raises.
+local SYNC_TIMEOUT = 5000
+local function synced(buf, gitsigns, done)
+  local ok, expected_lines, expected_removed = pcall(unstaged_now, buf)
+  if not ok then
+    return done(false)
+  end
+  local function agrees()
+    if not vim.api.nvim_buf_is_valid(buf) then
+      return false
+    end
+    local lines, removed = gitsigns_view(buf, gitsigns)
+    return lines ~= nil and vim.deep_equal(lines, expected_lines) and vim.deep_equal(removed, expected_removed)
+  end
+  if agrees() then
+    return done(true)
+  end
+  local deadline = vim.uv.now() + SYNC_TIMEOUT
+  local asked = 0
+  local function ask()
+    asked = asked + 1
+    -- The update only runs while a window shows the buffer (the callers
+    -- see to that).
+    if type(gitsigns.refresh) == 'function' then
+      pcall(gitsigns.refresh)
+    end
+  end
+  ask()
+  local function check()
+    if agrees() then
+      return done(true)
+    end
+    if not vim.api.nvim_buf_is_valid(buf) or vim.uv.now() > deadline then
+      return done(false)
+    end
+    -- An update that was running when the cache was dropped can finish with
+    -- what it read before; ask again now and then.
+    if vim.uv.now() > deadline - SYNC_TIMEOUT + asked * 1000 then
+      ask()
+    end
+    vim.defer_fn(check, 30)
+  end
+  vim.defer_fn(check, 30)
+end
+
 local function plural(n, word)
   return ('%d %s%s'):format(n, word, n == 1 and '' or 's')
 end
@@ -123,7 +199,10 @@ end
 --   { detached = true }                        gitsigns is not attached
 --   { staged = n, left = n, left_lines = {} }  lines staged, lines still
 --                                              unstaged, first line of each
---                                              range that was not staged
+--                                              range that was not staged;
+--                                              unsynced = true when gitsigns
+--                                              never agreed with git (see
+--                                              `synced`) and staging stopped
 local function stage_ranges(ranges, buf, gitsigns, done)
   -- gitsigns attaches to buffers asynchronously and silently does nothing
   -- for a buffer it is not attached to yet.
@@ -140,6 +219,7 @@ local function stage_ranges(ranges, buf, gitsigns, done)
     return done({ staged = 0, left = 0, left_lines = {} })
   end
 
+  local unsynced = false
   local function finish()
     local after = unstaged_now(buf)
     local left, left_lines = 0, {}
@@ -150,7 +230,19 @@ local function stage_ranges(ranges, buf, gitsigns, done)
         table.insert(left_lines, p[1])
       end
     end
-    done({ staged = math.max(0, total - left), left = left, left_lines = left_lines })
+    done({ staged = math.max(0, total - left), left = left, left_lines = left_lines, unsynced = unsynced or nil })
+  end
+
+  -- Run `fn` once gitsigns agrees with git; stop with what is staged so far
+  -- when it does not.
+  local function when_synced(fn)
+    synced(buf, gitsigns, function(ok)
+      if ok then
+        return fn()
+      end
+      unsynced = true
+      ui.safe(finish)()
+    end)
   end
 
   -- stage_hunk is asynchronous, so stage one range after the other.
@@ -163,22 +255,55 @@ local function stage_ranges(ranges, buf, gitsigns, done)
     local unstaged, _, top_deletion = unstaged_now(buf)
     if top_deletion and r.from <= 1 and not tried_top[i] then
       tried_top[i] = true
-      return stage_top_deletion(buf, gitsigns, function()
-        stage(i) -- look again: the range may have more to stage
+      return when_synced(function()
+        stage_top_deletion(buf, gitsigns, function()
+          stage(i) -- look again: the range may have more to stage
+        end)
       end)
     end
     if #pending_lines(unstaged, r) == 0 then
       return stage(i + 1)
     end
-    vim.api.nvim_buf_call(buf, function()
-      gitsigns.stage_hunk({ r.from, r.to }, {}, function()
-        vim.schedule(ui.safe(function()
-          stage(i + 1)
-        end))
+    when_synced(function()
+      vim.api.nvim_buf_call(buf, function()
+        gitsigns.stage_hunk({ r.from, r.to }, {}, function()
+          vim.schedule(ui.safe(function()
+            stage(i + 1)
+          end))
+        end)
       end)
     end)
   end
   stage(1)
+end
+
+-- A step without ranges has no group to cut the file by: stage everything
+-- that is still unstaged in it. gitsigns stages what it knows as unstaged
+-- (it never toggles), and the result is read back from git:
+--   { detached = true }   gitsigns is not attached
+--   { unsynced = true }   gitsigns never agreed with git (see `synced`)
+--   { nothing = true }    nothing was unstaged
+--   { left = true }       something stayed unstaged
+--   {}                    the file is staged
+local function stage_whole(buf, gitsigns, done)
+  if not vim.b[buf].gitsigns_status_dict then
+    return done({ detached = true })
+  end
+  if next((unstaged_now(buf))) == nil then
+    return done({ nothing = true })
+  end
+  synced(buf, gitsigns, function(ok)
+    if not ok then
+      return done({ unsynced = true })
+    end
+    vim.api.nvim_buf_call(buf, function()
+      gitsigns.stage_buffer(function()
+        vim.schedule(ui.safe(function()
+          done(next((unstaged_now(buf))) ~= nil and { left = true } or {})
+        end))
+      end)
+    end)
+  end)
 end
 
 -- The message for one file: what happened, as git reports it.
@@ -187,17 +312,20 @@ local function report_file(res, name)
   local msg
   if res.detached then
     level, msg = vim.log.levels.WARN, 'gitsigns is not attached to this file yet, try again'
+  elseif res.unsynced and res.left > 0 then
+    level, msg = vim.log.levels.WARN,
+      ('commit "%s": gitsigns has not caught up with git, %s not staged (try again)'):format(name, plural(res.left, 'line'))
   elseif res.staged == 0 and res.left == 0 then
-    msg = 'nothing left to stage for this group in this file'
+    msg = 'nothing left to stage for this commit in this file'
   else
     local left = #res.left_lines
     if left == 0 then
-      msg = ('staged group "%s": %s'):format(name, plural(res.staged, 'line'))
+      msg = ('staged commit "%s": %s'):format(name, plural(res.staged, 'line'))
     else
       local rest = ('%s could not be staged (%s %s)'):format(
         plural(left, 'range'), left == 1 and 'line' or 'lines', table.concat(res.left_lines, ', '))
-      msg = res.staged > 0 and ('staged %s of group "%s"; %s'):format(plural(res.staged, 'line'), name, rest)
-        or ('group "%s": %s'):format(name, rest)
+      msg = res.staged > 0 and ('staged %s of commit "%s"; %s'):format(plural(res.staged, 'line'), name, rest)
+        or ('commit "%s": %s'):format(name, rest)
       level = vim.log.levels.WARN
     end
   end
@@ -206,14 +334,22 @@ end
 
 -- Stage exactly the current group's changes in the code window's file, by
 -- line range, so mixed hunks are split and other groups are never touched.
--- With `{ all = true }`: in every file of the tour (see stage_all).
+-- A step without ranges ("hunks") has no group: all unstaged changes of its
+-- file are staged. With `{ all = true }`: in every file of the tour (see
+-- stage_all).
 function M.stage_group(opts)
   if opts and opts.all then
     return M.stage_all()
   end
+  -- In the compact view the code window shows no file: the group is staged
+  -- in the file of the entry under the cursor, the way a tour stages.
+  local entry = compact.target()
+  if entry then
+    return M.stage_all(entry)
+  end
   local step = st.history[st.pos]
-  if not (step and step.hunks) then
-    vim.notify('walkthrough: this step lists no group ranges ("hunks")', vim.log.levels.WARN)
+  if not step then
+    vim.notify('walkthrough: no review open', vim.log.levels.INFO)
     return
   end
   local ok, gitsigns = pcall(require, 'gitsigns')
@@ -235,19 +371,38 @@ function M.stage_group(opts)
   -- The numbers are synced against the file on disk, and gitsigns stages from
   -- the buffer: load an outside edit first, so both see the same lines.
   vim.cmd('silent! checktime ' .. buf)
+  if not step.hunks then
+    local shown = vim.fn.fnamemodify(step.file, ':~:.')
+    return M.with_tracked(buf, function()
+      stage_whole(buf, gitsigns, function(res)
+        if res.detached then
+          vim.notify('walkthrough: gitsigns is not attached to this file yet, try again', vim.log.levels.WARN)
+        elseif res.unsynced then
+          vim.notify('walkthrough: gitsigns has not caught up with git, ' .. shown .. ' not staged (try again)', vim.log.levels.WARN)
+        elseif res.nothing then
+          vim.notify('walkthrough: nothing left to stage in ' .. shown, vim.log.levels.INFO)
+        elseif res.left then
+          vim.notify('walkthrough: could not stage all of ' .. shown, vim.log.levels.WARN)
+        else
+          vim.notify('walkthrough: staged ' .. shown, vim.log.levels.INFO)
+        end
+        ui.refresh_progress()
+      end)
+    end)
+  end
   -- Numbers first follow the edits made since they were written, or the
   -- wrong lines would be staged.
-  ui.redraw(step, st.pos, #st.history)
+  ui.redraw(step)
   for _, h in ipairs(step.hunks) do
     if h.stale and (h.group == nil or h.group == step.group) then
-      vim.notify(('walkthrough: lines %d-%d of group "%s" were edited; not staging until the ranges are updated (patch "hunks")')
-        :format(h.from, h.to or h.from, step.group or 'this step'), vim.log.levels.WARN)
+      vim.notify(('walkthrough: lines %d-%d of commit "%s" were edited; not staging until the ranges are updated (patch "hunks")')
+        :format(h.from, h.to or h.from, step.group or 'this entry'), vim.log.levels.WARN)
       return
     end
   end
   M.with_tracked(buf, function()
     stage_ranges(tour.group_ranges(step), buf, gitsigns, function(res)
-      report_file(res, step.group or 'this step')
+      report_file(res, step.group or 'this entry')
     end)
   end)
 end
@@ -326,10 +481,10 @@ end
 -- the other. Files that are not open are loaded; untracked ones are
 -- registered first. A file with edited (stale) ranges is skipped and named
 -- in the final message, which reports what git has afterwards.
-function M.stage_all()
-  local t = tours.active()
+function M.stage_all(only)
+  local t = only and only.t or tours.active()
   if not t then
-    vim.notify('walkthrough: no tour open', vim.log.levels.INFO)
+    vim.notify('walkthrough: no review open', vim.log.levels.INFO)
     return
   end
   local ok, gitsigns = pcall(require, 'gitsigns')
@@ -342,8 +497,12 @@ function M.stage_all()
     return
   end
 
+  -- Files whose steps list ranges are staged by range; the others (steps
+  -- without ranges) as a whole, after the first kind.
+  -- With `only` ({ t, step }, the compact view's entry): that entry alone.
+  local scope = only and { only.step } or t.steps
   local order, by_file = {}, {}
-  for _, step in ipairs(t.steps) do
+  for _, step in ipairs(scope) do
     if step.hunks then
       local abs = vim.fn.fnamemodify(step.file, ':p')
       if not by_file[abs] then
@@ -353,17 +512,28 @@ function M.stage_all()
       table.insert(by_file[abs], step)
     end
   end
+  local ranged = #order
+  local plain = {}
+  for _, step in ipairs(scope) do
+    local abs = vim.fn.fnamemodify(step.file, ':p')
+    if not step.hunks and not by_file[abs] and not plain[abs] then
+      plain[abs] = true
+      table.insert(order, abs)
+    end
+  end
   if #order == 0 then
-    vim.notify('walkthrough: no step of this tour lists group ranges ("hunks")', vim.log.levels.WARN)
+    vim.notify('walkthrough: no file to stage in this commit', vim.log.levels.WARN)
     return
   end
-  local name = t.group or (t.steps[t.pos] or {}).group or 'this tour'
+  local name = t.group or (t.steps[t.pos] or {}).group or 'this review'
 
   -- Staging approves the code; the steps record that it was read.
-  local unseen = #t.steps - tours.seen_count(t)
+  local unseen = only and 0 or (#t.steps - tours.seen_count(t))
   if unseen > 0 then
-    local question = ('%d of %d steps were not shown yet. Stage group "%s" in %s anyway?')
-      :format(unseen, #t.steps, name, plural(#order, 'file'))
+    local question = ranged > 0
+      and ('%d of %d entries were not shown yet. Stage commit "%s" in %s anyway?')
+        :format(unseen, #t.steps, name, plural(#order, 'file'))
+      or ('%d of %d entries were not shown yet. Stage %s anyway?'):format(unseen, #t.steps, plural(#order, 'file'))
     if vim.fn.confirm(question, '&Stage\n&Cancel', 2) ~= 1 then
       vim.notify('walkthrough: not staged', vim.log.levels.INFO)
       return
@@ -372,6 +542,7 @@ function M.stage_all()
 
   staging_all = true
   local staged, files, left, left_in, skipped = 0, 0, 0, {}, {}
+  local whole = {} -- files staged as a whole
   local function shown(abs)
     return vim.fn.fnamemodify(abs, ':~:.')
   end
@@ -379,19 +550,28 @@ function M.stage_all()
   local function finish()
     staging_all = false
     local msg
-    if staged == 0 and left == 0 and #skipped == 0 then
-      msg = ('nothing left to stage for group "%s" in %s'):format(name, plural(#order, 'file'))
+    if staged == 0 and left == 0 and #skipped == 0 and #whole == 0 then
+      msg = ranged > 0 and ('nothing left to stage for commit "%s" in %s'):format(name, plural(#order, 'file'))
+        or ('nothing left to stage in %s'):format(plural(#order, 'file'))
     else
-      msg = ('staged group "%s": %s in %s'):format(name, plural(staged, 'line'), plural(files, 'file'))
+      local parts = {}
+      if ranged > 0 then
+        table.insert(parts, ('staged commit "%s": %s in %s'):format(name, plural(staged, 'line'), plural(files, 'file')))
+      end
+      if #whole > 0 then
+        table.insert(parts, 'staged ' .. table.concat(whole, ', '))
+      end
       if left > 0 then
-        msg = msg .. ('; %s left unstaged (%s)'):format(plural(left, 'line'), table.concat(left_in, ', '))
+        table.insert(parts, ('%s left unstaged (%s)'):format(plural(left, 'line'), table.concat(left_in, ', ')))
       end
       if #skipped > 0 then
-        msg = msg .. '; skipped ' .. table.concat(skipped, ', ')
+        table.insert(parts, 'skipped ' .. table.concat(skipped, ', '))
       end
+      msg = table.concat(parts, '; ')
     end
     vim.notify('walkthrough: ' .. msg, (left > 0 or #skipped > 0) and vim.log.levels.WARN or vim.log.levels.INFO)
     ui.refresh_progress()
+    ui.refresh_compact()
   end
 
   local run
@@ -420,14 +600,29 @@ function M.stage_all()
     end
     local steps = by_file[abs]
     local pok, err = pcall(function()
-      local buf, why = prepare_file(abs, steps)
+      local buf, why = prepare_file(abs, steps or {})
       if not buf then
         return skip(why)
       end
-      local ranges = merged_ranges(steps)
+      local ranges = steps and merged_ranges(steps)
       local function stage_it()
         M.with_tracked(buf, function()
           await_attached(buf, function()
+            if plain[abs] then
+              return stage_whole(buf, gitsigns, function(res)
+                if res.detached then
+                  return skip('gitsigns is not attached')
+                elseif res.unsynced then
+                  return skip('gitsigns has not caught up with git')
+                elseif res.left then
+                  return skip('could not be staged')
+                elseif not res.nothing then
+                  table.insert(whole, shown(abs))
+                end
+                leave()
+                advance(i)
+              end)
+            end
             stage_ranges(ranges, buf, gitsigns, function(res)
               if res.detached then
                 return skip('gitsigns is not attached')
@@ -438,7 +633,8 @@ function M.stage_all()
               end
               if res.left > 0 then
                 left = left + res.left
-                table.insert(left_in, ('%s: %s'):format(shown(abs), table.concat(res.left_lines, ' ')))
+                table.insert(left_in, ('%s: %s%s'):format(shown(abs), table.concat(res.left_lines, ' '),
+                  res.unsynced and ', gitsigns has not caught up with git' or ''))
               end
               leave()
               advance(i)
@@ -463,6 +659,9 @@ function M.stage_all()
 end
 
 -- Shared with reject.lua.
+M.await_attached = await_attached
+M.synced = synced
+M.show_for_gitsigns = show_for_gitsigns
 M.merged_ranges = merged_ranges
 M.pending_lines = pending_lines
 M.unstaged_now = unstaged_now

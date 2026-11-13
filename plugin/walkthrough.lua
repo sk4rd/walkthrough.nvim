@@ -20,13 +20,21 @@ local function status()
     return vim.notify('walkthrough: status unavailable', vim.log.levels.ERROR)
   end
   if s.step == 0 then
-    return vim.notify('walkthrough: no tour open', vim.log.levels.INFO)
+    if s.groups then
+      -- Only threads on files outside every review: no entry to report.
+      return vim.notify(('walkthrough: no entry shown, %d commit%s loaded'):format(
+        #s.groups, #s.groups == 1 and '' or 's'), vim.log.levels.INFO)
+    end
+    return vim.notify('walkthrough: no review open', vim.log.levels.INFO)
   end
-  local line = ('walkthrough: step %d/%d%s, seen %d, %d tour%s loaded'):format(
+  local line = ('walkthrough: entry %d/%d%s, seen %d, %d commit%s loaded, %s view'):format(
     s.step, s.total, s.group and (' of "' .. s.group .. '"') or '', s.seen or 0,
-    #(s.groups or {}), #(s.groups or {}) == 1 and '' or 's')
+    #(s.groups or {}), #(s.groups or {}) == 1 and '' or 's', s.view or 'file')
   if s.stale then
     line = line .. (', %d stale'):format(#s.stale)
+  end
+  if s.map then
+    line = line .. ', map requested'
   end
   vim.notify(line, vim.log.levels.INFO)
 end
@@ -41,8 +49,6 @@ local function reviewed(name)
     vim.log.levels.INFO)
 end
 
-local comment_types = { 'question', 'issue', 'suggestion' }
-
 -- name -> function(arg, opts) ; `arg` is the rest of the command line and
 -- `opts` the command's (its range).
 local subcommands = {
@@ -50,7 +56,17 @@ local subcommands = {
   prev = function() wt().step(-1) end,
   ['note-next'] = function() wt().note(1) end,
   ['note-prev'] = function() wt().note(-1) end,
-  ask = function() wt().ask_line() end,
+  -- ask [text], change [text]: the lines are the command's range, else the cursor.
+  ask = function(arg, o)
+    wt().ask(arg ~= '' and arg or nil, o and o.range > 0 and { o.line1, o.line2 } or nil)
+  end,
+  change = function(arg, o)
+    wt().change(arg ~= '' and arg or nil, o and o.range > 0 and { o.line1, o.line2 } or nil)
+  end,
+  thread = function() wt().thread() end,
+  -- map: show the map panel, or hide it.
+  map = function() wt().map() end,
+  ['thread-delete'] = function() wt().thread_delete() end,
   stage = function(arg)
     if arg == 'all' then
       wt().stage_group({ all = true })
@@ -64,17 +80,11 @@ local subcommands = {
   status = status,
   group = function(arg) wt().group(arg ~= '' and arg or nil) end,
   resume = function() report(wt().resume()) end,
+  -- review [ref]: the files that differ from ref (default HEAD), without an agent.
+  review = function(arg) wt().review(arg ~= '' and arg or nil) end,
+  -- request: ask the working session for the map of the change under review.
+  request = function() wt().request() end,
   discard = function() report(wt().discard()) end,
-  -- comment [type] [text]; the lines are the command's range, else the cursor.
-  comment = function(arg, o)
-    local first, rest = arg:match('^(%S+)%s*(.*)$')
-    local ctype
-    if first and vim.tbl_contains(comment_types, first) then
-      ctype, arg = first, rest
-    end
-    wt().comment(ctype, arg ~= '' and arg or nil, o and o.range > 0 and { o.line1, o.line2 } or nil)
-  end,
-  ['comment-delete'] = function() wt().comment_delete() end,
   decide = function(arg)
     if arg ~= 'accept' and arg ~= 'reject' and arg ~= 'clear' then
       return vim.notify('walkthrough: decide takes accept, reject or clear', vim.log.levels.ERROR)
@@ -88,18 +98,28 @@ local subcommands = {
     end
     wt().explain(arg)
   end,
-  check = function(arg)
-    if arg ~= 'reveal' and arg ~= 'answer' then
-      return vim.notify('walkthrough: check takes reveal or answer', vim.log.levels.ERROR)
-    end
-    wt().check(arg)
-  end,
   reject = function() wt().reject_group() end,
+  -- commit: check, message and commit what is staged.
+  commit = function() wt().commit() end,
   base = function() wt().base() end,
   back = function() wt().step(0) end,
+  -- view [compact|file]: switch between the compact view and the file.
+  view = function(arg) wt().view(arg ~= '' and arg or nil) end,
   -- reviewed [name]: record the working tree as the point reviewed so far.
   reviewed = function(arg) reviewed(arg ~= '' and arg or nil) end,
   keys = function() wt().keys() end,
+  -- plan [approve|feedback]: the agent's plan under review (see plan.lua).
+  plan = function(arg)
+    if arg == '' then
+      wt().plan_show()
+    elseif arg == 'approve' then
+      wt().plan_approve()
+    elseif arg == 'feedback' then
+      wt().plan_feedback()
+    else
+      vim.notify('walkthrough: plan takes no argument, approve or feedback', vim.log.levels.ERROR)
+    end
+  end,
 }
 local names = vim.tbl_keys(subcommands)
 table.sort(names)
@@ -125,14 +145,14 @@ end, {
       pool = {}
       if words[2] == 'stage' then
         pool = { 'all' }
-      elseif words[2] == 'comment' and #words <= 3 then
-        pool = comment_types
       elseif words[2] == 'decide' then
         pool = { 'accept', 'reject', 'clear' }
+      elseif words[2] == 'view' then
+        pool = { 'compact', 'file' }
       elseif words[2] == 'explain' then
         pool = { 'simpler', 'deeper' }
-      elseif words[2] == 'check' then
-        pool = { 'reveal', 'answer' }
+      elseif words[2] == 'plan' then
+        pool = { 'approve', 'feedback' }
       elseif words[2] == 'group' then
         pool = { 'next', 'prev' }
         -- Read from the state table: completing must not load the module.
@@ -150,42 +170,43 @@ end, {
 })
 
 -- One <Plug> mapping per action: name -> { function, modes }. Modes default
--- to normal. The comment mappings work on a selection too.
+-- to normal. The ask and change mappings work on a selection too.
 local function plug(fn, modes)
   return { fn, modes or { 'n' } }
-end
-local function comment(ctype)
-  return plug(function() wt().comment(ctype) end, { 'n', 'x' })
 end
 local plugs = {
   next = plug(function() wt().step(1) end),
   prev = plug(function() wt().step(-1) end),
   back = plug(function() wt().step(0) end),
+  view = plug(function() wt().view() end),
   ['note-next'] = plug(function() wt().note(1) end),
   ['note-prev'] = plug(function() wt().note(-1) end),
   ['group-next'] = plug(function() wt().group('next') end),
   ['group-prev'] = plug(function() wt().group('prev') end),
-  ask = plug(function() wt().ask_line() end),
-  comment = comment('question'),
-  ['comment-issue'] = comment('issue'),
-  ['comment-suggestion'] = comment('suggestion'),
-  ['comment-delete'] = plug(function() wt().comment_delete() end),
+  ask = plug(function() wt().ask() end, { 'n', 'x' }),
+  change = plug(function() wt().change() end, { 'n', 'x' }),
+  thread = plug(function() wt().thread() end),
+  map = plug(function() wt().map() end),
+  ['thread-delete'] = plug(function() wt().thread_delete() end),
   send = plug(function() wt().send() end),
   accept = plug(function() wt().decide('accept') end),
   decline = plug(function() wt().decide('reject') end),
   undecide = plug(function() wt().decide('clear') end),
   simpler = plug(function() wt().explain('simpler') end),
   deeper = plug(function() wt().explain('deeper') end),
-  ['check-reveal'] = plug(function() wt().check('reveal') end),
-  ['check-answer'] = plug(function() wt().check('answer') end),
   stage = plug(function() wt().stage_group() end),
   ['stage-all'] = plug(function() wt().stage_group({ all = true }) end),
   reject = plug(function() wt().reject_group() end),
+  commit = plug(function() wt().commit() end),
   base = plug(function() wt().base() end),
   reviewed = plug(function() reviewed() end),
   resume = plug(function() report(wt().resume()) end),
+  review = plug(function() wt().review() end),
+  request = plug(function() wt().request() end),
   close = plug(function() report(wt().close()) end),
   keys = plug(function() wt().keys() end),
+  ['plan-feedback'] = plug(function() wt().plan_feedback() end),
+  ['plan-approve'] = plug(function() wt().plan_approve() end),
 }
 for name, p in pairs(plugs) do
   vim.keymap.set(p[2], '<Plug>(walkthrough-' .. name .. ')', p[1], { desc = 'Walkthrough: ' .. name })

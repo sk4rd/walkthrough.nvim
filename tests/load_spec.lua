@@ -1,6 +1,7 @@
 -- Integration tests for load, patch and step: validation (T-2), transactions
--- (T-3), panel (T-7), repositories without history (T-10), unsaved buffers
--- (T-12), stable note numbers (T-13), winbar (T-14), deleted-line cap.
+-- (T-3), the map in the panel (T-7), repositories without history (T-10),
+-- unsaved buffers (T-12), stable note numbers (T-13), winbar (T-14),
+-- deleted-line cap.
 local H = require('helpers')
 local check, send, w = H.check, H.send, H.w
 local f, g = H.work .. '/f.txt', H.work .. '/g.txt'
@@ -16,13 +17,15 @@ local function badges()
   end)
 end
 local function reset()
-  w.close()
+  -- discard, not close: a saved tour of an earlier part would come back with
+  -- the next load and show up in the map.
+  w.discard()
   vim.cmd('silent! %bwipeout!')
 end
 
 -- T-2: validation happens in load, before anything is shown ----------------------
 local res = send('load', { steps = {
-  { file = f, panel = '# One', notes = { { line = 2, text = 'n' } } },
+  { file = f, title = 'One', notes = { { line = 2, text = 'n' } } },
   { file = g, notes = { { text = 'no line' } } },
 } })
 check('T-2: load names the bad step and note', res == 'error: step 2, note 1: "line" is missing', res)
@@ -30,6 +33,9 @@ check('T-2: nothing was shown', status().step == 0 and all_marks() == 0 and H.pa
 
 check('T-2: hunk without from', send('load', { file = f, hunks = { { group = 'A' } } }) == 'error: hunk 1: "from" is missing')
 check('T-2: note past the end of the file', send('load', { file = g, notes = { { line = 2 } } }):match('past the end') ~= nil)
+check('T-2: panel and check were removed, so they are unknown fields', send('load', { file = f, panel = '# One' })
+  == 'error: unknown step field "panel"' and send('load', { steps = { { file = f }, { file = g, check = { question = 'q?' } } } })
+  == 'error: step 2: unknown step field "check"')
 check('T-2: unknown field is reported', send('load', { steps = { { file = f }, { file = g, titel = 'x' } } })
   == 'error: step 2: unknown step field "titel"')
 check('T-2: error has no plugin path and one line', (function()
@@ -40,11 +46,11 @@ check('T-2: not an object', w.load((function()
   local p = vim.fn.tempname()
   vim.fn.writefile({ '[1, 2]' }, p)
   return p
-end)()) == 'error: a tour or step must be a JSON object')
+end)()) == 'error: a map or an entry must be a JSON object')
 check('T-2: missing json file does not raise', pcall(w.load, '/nonexistent/x.json') and w.load('/nonexistent/x.json'):match('^error:') ~= nil)
 
 -- A valid tour still loads; the step with only a file is fine.
-check('valid tour loads', send('load', { group = 'A', steps = { { file = f, panel = '# One', notes = { { line = 2, text = 'n' } } }, { file = g } } }) == 'ok')
+check('valid tour loads', send('load', { group = 'A', steps = { { file = f, title = 'One', notes = { { line = 2, text = 'n' } } }, { file = g } } }) == 'ok')
 
 -- T-2: step() stays put when the target cannot be shown ---------------------------
 local log, find = H.capture_notify()
@@ -53,29 +59,30 @@ vim.fn.delete(g)
 w.step(1)
 check('T-2: failed step() notifies', find('cannot read file') ~= nil, vim.inspect(log))
 check('T-2: failed step() stays on the step', status().step == 1 and vim.fn.expand('%:t') == 'f.txt')
-check('T-2: failed step() leaves the step drawn', badges() >= 1 and H.panel_text():match('# One') ~= nil)
+check('T-2: failed step() leaves the step drawn', badges() >= 1 and H.panel_text():match('\n> ✓ f%.txt\n    One\n') ~= nil, H.panel_text())
 vim.fn.writefile(keep, g)
 w.step(1)
 check('step() moves once the file is back', status().step == 2)
 check('step() does not raise on a bad argument', pcall(w.step, nil))
 check('step() reports a missing step', (function()
   w.step(5)
-  return find('no later step') ~= nil
+  return find('no later entry') ~= nil
 end)())
 
 -- T-3: load is transactional -------------------------------------------------------
 reset()
-check('T-3: old tour', send('load', { steps = { { file = g, title = 'old tour', panel = '# Old', notes = { { line = 1, text = 'o' } } } } }) == 'ok')
+check('T-3: old tour', send('load', { steps = { { file = g, title = 'old tour', notes = { { line = 1, text = 'o' } } } } }) == 'ok')
 local before_marks = all_marks()
-res = send('load', { file = f, from = 2, to = 3, diff = 'no-such-ref', panel = '# New' })
+res = send('load', { file = f, from = 2, to = 3, diff = 'no-such-ref', title = 'new' })
 check('T-3: bad ref is reported', res:match('^error: git diff failed') ~= nil and not res:match('\n'), res)
 check('T-3: status still the old tour', status().step == 1 and status().title == 'old tour')
 check('T-3: code window shows the old step', vim.fn.expand('%:t') == 'g.txt')
 check('T-3: marks are the old step\'s', all_marks() == before_marks and before_marks > 0, all_marks())
-check('T-3: panel is the old step\'s', H.panel_text():match('# Old') ~= nil and not H.panel_text():match('# New'))
-check('T-3: winbar says step 1/1', H.panel_winbar():match('Step 1/1') ~= nil)
+check('T-3: panel is the old step\'s', H.panel_text():match('> ✓ g%.txt\n    old tour') ~= nil and not H.panel_text():match('new'),
+  H.panel_text())
+check('T-3: winbar says seen 1/1', H.panel_winbar():match('seen 1/1') ~= nil)
 reset()
-res = send('load', { file = f, from = 2, to = 3, diff = 'no-such-ref', panel = '# New' })
+res = send('load', { file = f, from = 2, to = 3, diff = 'no-such-ref', title = 'new' })
 check('T-3: failed first load draws nothing', res:match('^error:') ~= nil and all_marks() == 0 and status().step == 0)
 reset()
 check('T-3: failed lone step is not added to the history', (function()
@@ -103,9 +110,6 @@ check('T-3: patch that cannot be drawn is rolled back', res:match('^error:') ~= 
 check('T-13: remove did not renumber', (function()
   return st.history[1].notes[1].n == 2 and st.history[1].notes[2].n == 3
 end)())
-local headings = H.panel_text()
-check('T-13: panel headings keep their numbers', headings:match('### %[2%] line 2') and headings:match('### %[3%] line 3')
-  and not headings:match('### %[1%]'), headings)
 check('T-13: note_lines use the numbers', st.note_lines[2] == 2 and st.note_lines[3] == 3 and st.note_lines[1] == nil, vim.inspect(st.note_lines))
 check('T-13: add a note as number 4', send('patch', { note = 4, line = 5, text = 'added' }) == 'ok' and st.note_lines[4] == 5)
 check('T-13: number 1 is not reused', send('patch', { note = 1, line = 6, text = 'x' }):match('must be number 5') ~= nil)
@@ -113,20 +117,30 @@ vim.api.nvim_win_set_cursor(0, { 1, 0 })
 w.note(1)
 check('T-13: note navigation uses the numbers', vim.api.nvim_win_get_cursor(0)[1] == 2)
 check('T-13: unset a step field', send('patch', { unset = { 'notes' } }) == 'ok' and st.history[1].notes == nil)
-send('patch', { title = 'has title', panel = 'text', from = 2, to = 3 })
-check('T-13: unset panel and to', send('patch', { unset = { 'panel', 'to' } }) == 'ok' and st.history[1].panel == nil
+send('patch', { title = 'has title', from = 2, to = 3 })
+check('T-13: unset title and to', send('patch', { unset = { 'title', 'to' } }) == 'ok' and st.history[1].title == nil
   and st.history[1].to == nil and st.history[1].from == 2)
+check('T-13: panel and check cannot be patched', send('patch', { panel = 'text' }):match('^error: patch 1: unknown step field "panel"$') ~= nil
+  and send('patch', { check = { question = 'q?' } }):match('^error: patch 1: unknown step field "check"$') ~= nil
+  and send('patch', { unset = { 'panel' } }):match('unknown step field "panel"') ~= nil)
 check('T-13: unset an unknown field fails', send('patch', { unset = { 'bogus' } }):match('^error:') ~= nil)
 
--- T-7: the panel always follows the step -------------------------------------------
+-- T-7: the map follows the step ------------------------------------------------------
 reset()
-send('load', { steps = { { file = f, title = 'First', panel = '# One', notes = { { line = 2, text = 'n' } } }, { file = g, title = 'Second' }, { file = f } } })
+send('load', { steps = { { file = f, title = 'First', notes = { { line = 2, text = 'n' } } }, { file = g, title = 'Second' }, { file = f } } })
+check('T-7: the unnamed tour is headed Changes, the shown step is marked', H.panel_text() == table.concat({
+  'Changes', '> ✓ f.txt', '    First', '    g.txt', '    Second', '    f.txt',
+}, '\n'), H.panel_text())
 w.step(1)
-check('T-7: step without panel shows its title', H.panel_text() == '# Second', H.panel_text())
+check('T-7: the marker moves with the step, and the step is seen', H.panel_text() == table.concat({
+  'Changes', '  ✓ f.txt', '    First', '> ✓ g.txt', '    Second', '    f.txt',
+}, '\n'), H.panel_text())
 w.step(1)
-check('T-7: step without title shows the file name', H.panel_text():match('^# .*f%.txt$') ~= nil, H.panel_text())
+check('T-7: a step without a title has no second line', H.panel_text() == table.concat({
+  'Changes', '  ✓ f.txt', '    First', '  ✓ g.txt', '    Second', '> ✓ f.txt',
+}, '\n'), H.panel_text())
 w.step(-2)
-check('T-7: going back shows the first panel again', H.panel_text():match('# One') and H.panel_text():match('### %[1%]'))
+check('T-7: going back marks the first step again', H.panel_text():match('^Changes\n> ✓ f%.txt\n    First\n'), H.panel_text())
 
 -- T-14: the code window's winbar is not touched ------------------------------------
 reset()
@@ -137,10 +151,10 @@ local code = st.code_win
 check('T-14: code winbar untouched while a tour runs', vim.wo[code].winbar == 'mine', vim.wo[code].winbar)
 
 local bar = H.panel_winbar()
-check('T-14: panel winbar has step, group and title', bar:match('Step 1/2') and bar:match('Feature') and bar:match('Look here'), bar)
+check('T-14: panel winbar has the group and what was seen', bar:match('Feature') and bar:match('seen 1/2'), bar)
 w.step(1)
 bar = H.panel_winbar()
-check('T-14: winbar follows the step', bar:match('Step 2/2') and bar:match('Next'), bar)
+check('T-14: winbar follows the step', bar:match('Feature') and bar:match('seen 2/2'), bar)
 check('T-14: no keys that do not exist', not bar:match('%[w') and not bar:match('leader'), bar)
 w.close()
 check('T-14: code winbar untouched after close', vim.wo[code].winbar == 'mine')
@@ -249,11 +263,11 @@ w.setup({ max_removed_lines = 10 })
 
 -- Entry points never raise -------------------------------------------------------------------
 reset()
-for _, name in ipairs({ 'setup', 'load', 'patch', 'status', 'close', 'step', 'note', 'ask_line', 'stage_group',
-  'with_tracked', 'clear', 'panel', 'annotate', 'keep_code_wide' }) do
+for _, name in ipairs({ 'setup', 'load', 'patch', 'status', 'close', 'step', 'note', 'ask', 'ask_line', 'change', 'thread', 'thread_delete', 'send', 'decide', 'explain', 'stage_group',
+  'with_tracked', 'clear', 'panel', 'annotate', 'keep_code_wide', 'review' }) do
   check('API: ' .. name, type(w[name]) == 'function')
 end
-check('socket: patch without a tour', send('patch', { title = 'x' }) == 'error: patch 1: no tour is open')
+check('socket: patch without a tour', send('patch', { title = 'x' }) == 'error: patch 1: no map is open')
 check('socket: patch of a non-object', (function()
   local p = vim.fn.tempname()
   vim.fn.writefile({ '3' }, p)
@@ -263,7 +277,15 @@ check('socket: close returns ok', w.close() == 'ok')
 check('socket: status without tour', w.status() == '{"step":0}')
 log, find = H.capture_notify()
 check('user: stage_group without a tour does not raise', pcall(w.stage_group))
-check('user: ask_line without a tour does not raise', pcall(w.ask_line))
+for _, name in ipairs({ 'ask', 'ask_line', 'change', 'thread', 'thread_delete', 'send', 'decide', 'explain' }) do
+  log, find = H.capture_notify()
+  -- Writing needs a file; the others need a tour.
+  local writing = name == 'ask' or name == 'ask_line' or name == 'change'
+  check('user: ' .. name .. ' without a tour does not raise, and says so', pcall(w[name], name == 'ask' and 'q' or (name == 'explain' and 'simpler' or nil))
+    and find(writing and 'this buffer is not one' or 'no review open') ~= nil, vim.inspect(log))
+end
+check('socket: patch of a thread without a tour', send('patch', { thread = 't1', answer = 'x' }):match('^error: patch 1: there is no thread t1$') ~= nil)
+check('socket: inbox without a tour', w.inbox() == '{"items":[]}')
 check('user: note without a tour does not raise', pcall(w.note, 1))
 
 H.finish()

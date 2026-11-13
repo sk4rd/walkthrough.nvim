@@ -170,7 +170,7 @@ check('regression: the note is on the line with A2', has_note(A2) and not has_no
 check('regression: A2 and A3 are the reviewed group', reviewed(A2) and reviewed(A3))
 check('regression: B4 is group B', on(B4, function(d) return H.sign(d, '·') end) and badge_text(B4):match('→ B'))
 check('regression: X8 and the new line are in no group', on(X8, function(d) return H.sign(d, '?') end)
-  and on(UA, function(d) return H.sign(d, '?') end) and badge_text(X8):match('not in any group'))
+  and on(UA, function(d) return H.sign(d, '?') end) and badge_text(X8):match('not in any commit'))
 check('regression: nothing is stale', status().stale == nil and not badge_text(A2):match('code changed'))
 check('regression: numbers moved', st.history[1].notes[1].line == A2 and st.history[1].from == A2 and st.history[1].to == A3)
 
@@ -179,7 +179,7 @@ if gs then
     return vim.iter(gs.get_hunks() or {}):any(function(h) return h.added.start == 1 end)
   end)
   w.stage_group()
-  H.wait_notify(find, 'staged group')
+  H.wait_notify(find, 'staged commit')
   H.wait(function() return H.git('diff', '--cached', '--numstat', '--', 'f.txt') ~= '' end)
   local diff = H.git('diff', '--cached', '-U0', '--', 'f.txt')
   check('regression: stages A2, A3 and the deletion of a10', diff:match('%-a2\n%-a3\n%+A2\n%+A3') ~= nil
@@ -224,7 +224,6 @@ check('stale: both notes are listed by status()', stat.stale and #stat.stale == 
   and stat.stale[1].kind == 'note' and stat.stale[1].step == 1 and stat.stale[1].note == 1 and stat.stale[1].line == 6
   and stat.stale[2].note == 2, vim.inspect(stat))
 check('stale: the note is drawn with a label', badge_text(6):match('%(code changed%)') ~= nil, badge_text(6))
-check('stale: the panel heading has it too', H.panel_text():match('### %[1%] line 6 %(code changed%)') ~= nil, H.panel_text())
 check('stale: the deleted line\'s note stays at the nearest line', st.history[1].notes[2].line == 8
   or st.history[1].notes[2].line == 7, vim.inspect(st.history[1].notes))
 

@@ -1,5 +1,6 @@
--- The panel's bar: step and progress are never cut off, and hints that do
--- not fit are repeated under the panel text.
+-- The panel's bar: group and progress are never cut off, and hints that do
+-- not fit are repeated under the map. Also the wrapping of long text in the
+-- code window.
 local H = require('helpers')
 local check, send, w = H.check, H.send, H.w
 local st = _G.walkthrough_state
@@ -21,30 +22,29 @@ end
 
 vim.o.columns = 200
 check('load', send('load', { group = 'A group with a long name', steps = {
-  { file = H.work .. '/f.txt', title = 'a title that is long enough to push the hints out of the bar', panel = { '# One', 'text' },
-    check = { question = 'q?', answer = 'a' } },
+  { file = H.work .. '/f.txt', title = 'a title that is long enough to push the hints out of the bar' },
   { file = H.work .. '/g.txt', title = 'two' } } }) == 'ok')
 
 check('the bar is cut in the hints, not at the start', H.panel_winbar():find('%<', 1, true) ~= nil
-  and H.panel_winbar():find('Step 1/2', 1, true) < H.panel_winbar():find('%<', 1, true), H.panel_winbar())
+  and H.panel_winbar():find('seen 1/2', 1, true) < H.panel_winbar():find('%<', 1, true), H.panel_winbar())
 
 vim.api.nvim_win_set_width(st.panel_win, 40)
 w.step(0)
-check('narrow panel: the step is still at the start of the bar', shown_bar():match('^%s*Step 1/2') ~= nil, shown_bar())
+check('narrow panel: the group is still at the start of the bar', shown_bar():match('^%s*A group with a long name') ~= nil, shown_bar())
 local marks, text = footer()
-check('narrow panel: the hints are under the text', #marks == 1 and text:match('jump to note') and text:match('r reveal') and text:match('simpler'), text)
+check('narrow panel: the hints are under the text', #marks == 1 and text:match('open') and text:match('stage all')
+  and text:match('all keys'), text)
 check('narrow panel: the footer is on the last line', marks[1] and marks[1][2] == vim.api.nvim_buf_line_count(st.panel_buf) - 1)
 local too_wide = false
 for _, line in ipairs(vim.split(text, '\n')) do
   too_wide = too_wide or vim.fn.strdisplaywidth(line) > 40
 end
 check('narrow panel: footer lines fit the panel', not too_wide, text)
-check('the hints are not part of the buffer text', not H.panel_text():match('jump to note'))
+check('the hints are not part of the buffer text', not H.panel_text():match('stage all'))
 
 w.step(1)
 marks, text = footer()
 check('next step: one footer, on the new last line', #marks == 1 and marks[1][2] == vim.api.nvim_buf_line_count(st.panel_buf) - 1)
-check('next step: no check keys without a check', not text:match('r reveal'), text)
 
 -- The code window keeps half the screen, so the screen has to grow as well.
 vim.o.columns = 300
@@ -53,7 +53,7 @@ w.step(0)
 marks = footer()
 check('wide panel: the bar fits, no footer', #marks == 0, shown_bar())
 
--- Virtual lines do not wrap: a long comment or answer is wrapped by hand ----
+-- Virtual lines do not wrap: a long thread or answer is wrapped by hand ----
 do
   local ui = require('walkthrough.ui')
   local wrapped = ui.wrap('one two three four five six seven eight nine ten eleven twelve', 20)
@@ -69,9 +69,10 @@ do
   send('load', { steps = { { file = H.work .. '/f.txt', title = 't' } } })
   vim.api.nvim_set_current_win(st.code_win)
   vim.api.nvim_win_set_cursor(0, { 3, 0 })
-  w.comment('question', 'why?')
+  require('walkthrough.state').config.sender = function() end
+  w.ask('why?')
   local long = string.rep('a fairly long answer that goes on ', 40)
-  check('long answer patch', send('patch', { comment = 'c1', answer = long }) == 'ok')
+  check('long answer patch', send('patch', { thread = 't1', answer = long }) == 'ok')
   local width = vim.api.nvim_win_get_width(st.code_win) - vim.fn.getwininfo(st.code_win)[1].textoff
   local lines, fits = {}, true
   for _, m in ipairs(vim.api.nvim_buf_get_extmarks(0, H.ns, 0, -1, { details = true })) do
@@ -81,34 +82,44 @@ do
     end
   end
   check('long answer: every virtual line fits the code window', fits and #lines > 2, vim.inspect(lines))
-  check('long answer: capped, with a pointer to the panel', lines[#lines]:match('more lines in the panel') ~= nil, lines[#lines])
-  check('long answer: the panel has all of it', H.panel_text():find(long, 1, true) ~= nil)
+  check('long answer: the whole thread is capped at 6 lines, ending with how to open it', #lines == 6
+    and lines[#lines]:match('^%s+… full thread: ') ~= nil, vim.inspect(lines))
 end
 
--- "This note" in the panel means the heading or any line of its text ------
+-- A note's detail is read under its text in the code window ------------------------
 do
-  local ui = require('walkthrough.ui')
-  send('load', { steps = { { file = H.work .. '/f.txt', title = 't', panel = { '# T', 'intro' },
-    notes = { { line = 2, text = 'one', detail = { 'first line', 'second line' } }, { line = 4, text = 'two', detail = 'other' } } } } })
-  vim.api.nvim_set_current_win(st.panel_win)
-  local function at(pattern)
-    for i, l in ipairs(vim.api.nvim_buf_get_lines(st.panel_buf, 0, -1, false)) do
-      if l:match(pattern) then
-        vim.api.nvim_win_set_cursor(st.panel_win, { i, 0 })
-        return true
+  send('load', { steps = { { file = H.work .. '/f.txt', title = 't',
+    notes = { { line = 2, text = 'one', detail = { 'first line', 'second line' } }, { line = 4, text = 'two' },
+      { line = 6, text = 'six', detail = string.rep('a long detail that goes on ', 40) } } } } })
+  vim.api.nvim_set_current_win(st.code_win)
+  local function virt_at(row)
+    local out = {}
+    for _, m in ipairs(vim.api.nvim_buf_get_extmarks(0, H.ns, { row - 1, 0 }, { row - 1, -1 }, { details = true })) do
+      for _, vl in ipairs(m[4].virt_lines or {}) do
+        table.insert(out, vl[1][1])
       end
     end
+    return out
   end
-  at('^### %[1%]')
-  check('panel: on a note heading', ui.note_under_cursor() == 1)
-  at('^second line')
-  check('panel: in the text of note 1', ui.note_under_cursor() == 1)
-  at('^other')
-  check('panel: in the text of note 2', ui.note_under_cursor() == 2)
-  at('^intro')
-  check('panel: in the step text is no note', ui.note_under_cursor() == nil)
-  at('^## Notes')
-  check('panel: on the section heading is no note', ui.note_under_cursor() == nil)
+  check('detail: under the text, indented to it, one line per line of detail',
+    vim.deep_equal(virt_at(2), { '[1] one', '    first line', '    second line' }), vim.inspect(virt_at(2)))
+  check('detail: a note without one is just its text', vim.deep_equal(virt_at(4), { '[2] two' }), vim.inspect(virt_at(4)))
+  local long = virt_at(6)
+  local width = vim.api.nvim_win_get_width(st.code_win) - vim.fn.getwininfo(st.code_win)[1].textoff
+  local fits = true
+  for _, l in ipairs(long) do
+    fits = fits and vim.fn.strdisplaywidth(l) <= width
+  end
+  check('detail: a long one is wrapped to the window and capped at 6 lines', #long == 1 + 6 + 1 and fits
+    and long[#long]:match('^%s+… %d+ more lines$') ~= nil, vim.inspect(long))
+  check('detail: the cap says how many lines are not shown', (function()
+    local total = #require('walkthrough.ui').wrap(string.rep('a long detail that goes on ', 40), width - 4 - 1)
+    return long[#long]:match('… (%d+) more') == tostring(total - 6)
+  end)(), vim.inspect(long))
+  local hl = H.marks(function(d)
+    return d.virt_lines and d.virt_lines[2] and d.virt_lines[2][1][2] == 'WalkthroughNoteDetail'
+  end)
+  check('detail: dimmed, apart from the text', hl == 2, hl)
 end
 
 w.close()

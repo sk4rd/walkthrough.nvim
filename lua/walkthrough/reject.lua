@@ -11,21 +11,24 @@ local tour = require('walkthrough.tour')
 local tours = require('walkthrough.tours')
 local store = require('walkthrough.store')
 local stage = require('walkthrough.stage')
+local compact = require('walkthrough.compact')
 
 local M = {}
 
 local rejecting = false
+local perform -- the second half of reject_group
+local perform_synced -- the last part of it, once gitsigns agrees with git
 
 local function notify(msg, level)
   vim.notify('walkthrough: ' .. msg, level or vim.log.levels.INFO)
 end
 
--- Every note, comment and hunk range of `steps` that is flagged stale, as a
+-- Every note, thread and hunk range of `steps` that is flagged stale, as a
 -- set, so that the flags an edit adds later can be told from those before.
 local function stale_set(steps)
   local set = {}
   for _, step in ipairs(steps) do
-    for _, list in ipairs({ step.notes or {}, step.comments or {}, step.hunks or {} }) do
+    for _, list in ipairs({ step.notes or {}, step.threads or {}, step.hunks or {} }) do
       for _, item in ipairs(list) do
         if item.stale then
           set[item] = true
@@ -63,16 +66,18 @@ local function reset_top_deletion(buf, gitsigns, done)
 end
 
 --- Discard the unstaged changes of the reviewed group in the current step's
---- file, after asking. Ranges are reset from the bottom of the file to the top,
+--- file (in the compact view: in the file of the entry under the cursor),
+--- after asking. Ranges are reset from the bottom of the file to the top,
 --- so the lines of the ones still to do do not move.
 function M.reject_group()
-  local t = tours.active()
-  local step = t and t.steps[t.pos]
+  local entry = compact.target()
+  local t = entry and entry.t or tours.active()
+  local step = entry and entry.step or (t and t.steps[t.pos])
   if not step then
-    return notify('no tour open')
+    return notify('no review open')
   end
   if not step.hunks then
-    return notify('this step lists no group ranges ("hunks")', vim.log.levels.WARN)
+    return notify('this entry assigns no lines to commits ("hunks")', vim.log.levels.WARN)
   end
   local ok, gitsigns = pcall(require, 'gitsigns')
   if not ok then
@@ -81,15 +86,50 @@ function M.reject_group()
   if rejecting then
     return notify('already rejecting')
   end
-  local buf = ui.code_buf()
-  if vim.api.nvim_buf_get_name(buf) ~= vim.fn.fnamemodify(step.file, ':p') then
-    return notify('the code window shows another file; switch back to ' .. vim.fn.fnamemodify(step.file, ':~:.'),
-      vim.log.levels.WARN)
+  local buf
+  if entry then
+    -- The compact view shows no file: load it, and show it where gitsigns
+    -- can see it for as long as the reject takes.
+    local abs = vim.fn.fnamemodify(step.file, ':p')
+    buf = vim.fn.bufadd(abs)
+    vim.fn.bufload(buf)
+  else
+    buf = ui.code_buf()
+    if vim.api.nvim_buf_get_name(buf) ~= vim.fn.fnamemodify(step.file, ':p') then
+      return notify('the code window shows another file; switch back to ' .. vim.fn.fnamemodify(step.file, ':~:.'),
+        vim.log.levels.WARN)
+    end
   end
   if vim.bo[buf].modified then
     return notify('save the file first', vim.log.levels.WARN)
   end
   vim.cmd('silent! checktime ' .. buf)
+
+  local view = entry and stage.show_for_gitsigns(buf)
+  local function leave()
+    if view and vim.api.nvim_win_is_valid(view) then
+      vim.api.nvim_win_close(view, true)
+    end
+  end
+  local function bail(msg, level)
+    leave()
+    notify(msg, level)
+  end
+  if entry and not vim.b[buf].gitsigns_status_dict then
+    gitsigns.attach(buf)
+  end
+  local function run()
+    perform(t, step, buf, gitsigns, { leave = leave, bail = bail })
+  end
+  if entry then
+    return stage.await_attached(buf, run)
+  end
+  run()
+end
+
+-- The rest of `reject_group`, once the buffer of the step's file is ready.
+perform = function(t, step, buf, gitsigns, done)
+  local leave, bail = done.leave, done.bail
 
   -- Every step of the tour about this file holds ranges of the group.
   local steps = {}
@@ -104,21 +144,40 @@ function M.reject_group()
   for _, s in ipairs(steps) do
     for _, h in ipairs(s.hunks) do
       if h.stale and (h.group == nil or h.group == s.group) then
-        return notify(('lines %d-%d of group "%s" were edited; not rejecting until the ranges are updated (patch "hunks")')
-          :format(h.from, h.to or h.from, s.group or 'this step'), vim.log.levels.WARN)
+        return bail(('lines %d-%d of commit "%s" were edited; not rejecting until the ranges are updated (patch "hunks")')
+          :format(h.from, h.to or h.from, s.group or 'this entry'), vim.log.levels.WARN)
       end
     end
   end
 
   local file = vim.api.nvim_buf_get_name(buf)
   if not git.is_tracked(vim.fs.dirname(file), file) then
-    return notify('this file is new to git: there is nothing to restore it to', vim.log.levels.WARN)
+    return bail('this file is new to git: there is nothing to restore it to', vim.log.levels.WARN)
   end
   if not vim.b[buf].gitsigns_status_dict then
-    return notify('gitsigns is not attached to this file yet, try again', vim.log.levels.WARN)
+    return bail('gitsigns is not attached to this file yet, try again', vim.log.levels.WARN)
   end
 
-  local name = step.group or 'this step'
+  -- gitsigns resets from its cache of the buffer's hunks, which is stale
+  -- after a commit or reset until it has read the buffer again.
+  rejecting = true -- no second reject while this waits
+  stage.synced(buf, gitsigns, function(ok)
+    rejecting = false -- perform_synced sets it again for the resets
+    if not ok then
+      return bail('gitsigns has not caught up with git, nothing was discarded (try again)', vim.log.levels.WARN)
+    end
+    local pok, perr = pcall(perform_synced, step, steps, buf, gitsigns, done)
+    if not pok then
+      rejecting = false
+      leave()
+      notify(tour.clean_error(perr), vim.log.levels.ERROR)
+    end
+  end)
+end
+
+perform_synced = function(step, steps, buf, gitsigns, done)
+  local leave, bail = done.leave, done.bail
+  local name = step.group or 'this entry'
   local unstaged, _, top_deletion = stage.unstaged_now(buf)
   local list, lines, pending_total = {}, {}, 0
   for _, r in ipairs(stage.merged_ranges(steps)) do
@@ -132,12 +191,12 @@ function M.reject_group()
     end
   end
   if pending_total == 0 then
-    return notify(('nothing to reject: group "%s" has no unstaged changes in this file'):format(name))
+    return bail(('nothing to reject: commit "%s" has no unstaged changes in this file'):format(name))
   end
-  local question = ('Discard %s of group "%s" in %s? Staged changes stay. This cannot be undone.')
+  local question = ('Discard %s of commit "%s" in %s? Staged changes stay. This cannot be undone.')
     :format(stage.plural(pending_total, 'unstaged line'), name, vim.fn.fnamemodify(step.file, ':~:.'))
   if vim.fn.confirm(question, '&Discard\n&Cancel', 2) ~= 1 then
-    return notify('not rejected')
+    return bail('not rejected')
   end
 
   local was_stale = stale_set(steps)
@@ -147,6 +206,7 @@ function M.reject_group()
 
   local function finish()
     rejecting = false
+    leave()
     local pok, perr = pcall(function()
       if vim.bo[buf].modified then
         vim.api.nvim_buf_call(buf, function()
@@ -177,7 +237,7 @@ function M.reject_group()
       for _, s in ipairs(steps) do
         pcall(tour.sync, s)
         -- The reject moved the numbers, it did not make anything doubtful.
-        for _, kind in ipairs({ 'notes', 'comments', 'hunks' }) do
+        for _, kind in ipairs({ 'notes', 'threads', 'hunks' }) do
           for _, item in ipairs(s[kind] or {}) do
             if item.stale and not was_stale[item] then
               item.stale = nil
@@ -190,10 +250,10 @@ function M.reject_group()
       ui.refresh_progress()
       local discarded = pending_total - left
       if left > 0 then
-        notify(('discarded %s of group "%s"; %s could not be discarded'):format(
+        notify(('discarded %s of commit "%s"; %s could not be discarded'):format(
           stage.plural(discarded, 'line'), name, stage.plural(left, 'line')), vim.log.levels.WARN)
       else
-        notify(('discarded %s of group "%s" in %s; staged changes were kept'):format(
+        notify(('discarded %s of commit "%s" in %s; staged changes were kept'):format(
           stage.plural(discarded, 'unstaged line'), name, vim.fn.fnamemodify(step.file, ':~:.')))
       end
     end)
@@ -240,6 +300,7 @@ function M.reject_group()
   local run_ok, run_err = pcall(reset, 1)
   if not run_ok then
     rejecting = false
+    leave()
     error(run_err, 0)
   end
 end

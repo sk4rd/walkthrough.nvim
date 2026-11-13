@@ -107,7 +107,7 @@ end
 
 --- Move every position of `step` from the lines in `step._snap` to
 --- `new_lines`, in place, and make `new_lines` the new `_snap`. Notes whose
---- line changed, comments whose code was rewritten and hunk ranges hit by an
+--- line changed, threads whose code was rewritten and hunk ranges hit by an
 --- edit get `stale = true` (never cleared here). Returns whether a position or flag changed.
 function M.sync_step(step, new_lines)
   local old_lines = step._snap
@@ -147,9 +147,9 @@ function M.sync_step(step, new_lines)
     end
   end
 
-  -- A comment is about the code on its lines: a rewrite or a deletion of any
+  -- A thread is about the code on its lines: a rewrite or a deletion of any
   -- of them makes it stale, lines inserted inside only widen it.
-  for _, c in ipairs(step.comments or {}) do
+  for _, c in ipairs(step.threads or {}) do
     local rewritten = false
     for _, h in ipairs(hunks) do
       local a_start, a_count = h[1], h[2]

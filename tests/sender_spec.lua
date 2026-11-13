@@ -1,6 +1,6 @@
--- Senders (P-5): terminal (bracketed paste into a real :terminal), clipboard,
--- a function, and what `auto` picks. The claudecode sender has its own
--- tests in send_spec.lua.
+-- Senders (P-5): terminal (bracketed paste into a real :terminal, submitted or
+-- not), clipboard, a function, and what `auto` picks. The claudecode sender
+-- has its own tests in send_spec.lua. The messages come from asking a question.
 local H = require('helpers')
 local check, send, w = H.check, H.send, H.w
 local st = _G.walkthrough_state
@@ -11,6 +11,13 @@ local f = H.work .. '/f.txt'
 send('load', { steps = { { file = f, title = 'one', notes = { { line = 2, text = 'trim', verdict = 'simplify' } } } } })
 local code_win = vim.api.nvim_get_current_win()
 vim.api.nvim_win_set_cursor(code_win, { 2, 0 })
+-- Asking on `line`: every ask starts a new thread.
+local function ask(line, text)
+  st.history[1].threads = nil
+  vim.api.nvim_set_current_win(code_win)
+  vim.api.nvim_win_set_cursor(code_win, { line or 2, 0 })
+  w.ask(text or 'why trim?')
+end
 
 local function terminal_lines(buf)
   return table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), '\n')
@@ -35,34 +42,46 @@ check('auto: no claudecode and no terminal gives the clipboard', sender.resolve(
 -- clipboard ---------------------------------------------------------------------
 st.config.sender = 'clipboard'
 local reg = vim.fn.has('clipboard') == 1 and '+' or '"'
-check('clipboard: ask does not raise', pcall(w.ask_line))
+local saved_reg = vim.fn.getreg(reg)
+check('clipboard: ask does not raise', pcall(ask))
 local text = vim.fn.getreg(reg)
-check('clipboard: the text is in the register (' .. reg .. ')', text:match('Walkthrough step 1/1') ~= nil
-  and text:match('Inline: trim') ~= nil and text:match('f%.txt:2%-2') ~= nil
-  and text:match('Apply the simplification from note %[1%]: $') ~= nil, text)
+check('clipboard: the text is in the register (' .. reg .. ')', text:match('Question t1 at f%.txt:2, step 1') ~= nil
+  and text:match('User: why trim%?') ~= nil and text:match('Finding %[1%] %(verdict: simplify%): trim') ~= nil
+  and text:match('f%.txt:2%-2') ~= nil and text:match('{ "thread": "t1", "answer": "%.%.%." }') ~= nil, text)
 check('clipboard: the user is told', find('copied to the clipboard') ~= nil)
+check('clipboard: a question that was copied counts as sent', st.history[1].threads[1].state == 'waiting')
+vim.fn.setreg(reg, saved_reg)
 
 -- function ----------------------------------------------------------------------
 local got
 st.config.sender = function(msg)
   got = msg
 end
-w.ask_line()
-check('function: receives the message', got ~= nil and got.text:match('Inline: trim') ~= nil
+ask()
+check('function: receives the message', got ~= nil and got.text:match('User: why trim%?') ~= nil
   and #got.refs == 1 and got.refs[1].file == vim.fn.fnamemodify(f, ':p') and got.refs[1].from == 2 and got.refs[1].to == 2
-  and got.prefill == 'Apply the simplification from note [1]: ', vim.inspect(got))
+  and got.prefill == nil, vim.inspect(got))
+check('function: receives submit, on by default', got.submit == true)
+st.config.submit = false
+ask()
+check('function: ... and false when the option is off', got.submit == false)
+st.config.submit = true
+ask(4)
+check('function: a line without a finding sends the code and no finding', got.text:match('Question t%d+ at f%.txt:4, step 1') ~= nil
+  and not got.text:match('Finding'), vim.inspect(got))
 st.config.sender = function()
   error('boom', 0)
 end
-check('function: a failing sender is reported, not raised', pcall(w.ask_line) and find('boom') ~= nil)
+check('function: a failing sender is reported, not raised', pcall(ask) and find('boom') ~= nil)
+check('function: ... and the question is kept', st.history[1].threads[1].state == 'draft')
 st.config.sender = 'nonsense'
-check('unknown sender is reported, not raised', pcall(w.ask_line) and find('unknown sender') ~= nil)
+check('unknown sender is reported, not raised', pcall(ask) and find('unknown sender') ~= nil)
 check('setup rejects an unknown sender', not pcall(w.setup, { sender = 'nonsense' }))
 check('setup accepts a function sender', pcall(w.setup, { sender = function() end }))
 
 -- terminal ----------------------------------------------------------------------
 st.config.sender = 'terminal'
-check('terminal: no terminal is an error message', pcall(w.ask_line) and find('no agent terminal found') ~= nil)
+check('terminal: no terminal is an error message', pcall(ask) and find('no agent terminal found') ~= nil)
 
 -- A terminal in another tab and one here: the one here wins.
 vim.cmd('tabnew')
@@ -90,18 +109,28 @@ vim.api.nvim_chan_send = function(chan, data)
   table.insert(sent, data)
   return real(chan, data)
 end
-w.ask_line()
-vim.api.nvim_chan_send = real
-check('terminal: one bracketed paste', #sent == 1 and sent[1]:sub(1, 6) == '\27[200~' and sent[1]:sub(-6) == '\27[201~', vim.inspect(sent))
-check('terminal: nothing is submitted (no newline before the end)', #sent == 1 and sent[1]:sub(-7, -7) ~= '\n'
-  and sent[1]:sub(-7, -7) ~= '\r', vim.inspect(sent))
+ask()
+check('terminal: the bracketed paste, then a carriage return', #sent == 2 and sent[1]:sub(1, 6) == '\27[200~' and sent[1]:sub(-6) == '\27[201~'
+  and sent[2] == '\r', vim.inspect(sent))
 check('terminal: the bytes arrive', H.wait(function()
   local t = terminal_lines(buf)
-  return t:match('f%.txt:2%-2') and t:match('Apply the simplification from note %[1%]: ')
+  return t:match('Question t%d+ at f%.txt:2') and t:match('User: why trim%?')
 end), terminal_lines(buf))
-check('terminal: focus moves to the terminal window', vim.api.nvim_get_current_win() == win)
+check('terminal: the focus stays in the code window', vim.api.nvim_get_current_win() == code_win and vim.fn.mode() == 'n')
+check('terminal: the question is waiting', st.history[1].threads[1].state == 'waiting')
+
+-- submit = false: as before, nothing is submitted and the focus moves.
+st.config.submit = false
+sent = {}
+ask()
+vim.api.nvim_chan_send = real
+check('terminal, submit off: one bracketed paste', #sent == 1 and sent[1]:sub(1, 6) == '\27[200~' and sent[1]:sub(-6) == '\27[201~', vim.inspect(sent))
+check('terminal, submit off: nothing is submitted (no newline before the end)', #sent == 1 and sent[1]:sub(-7, -7) ~= '\n'
+  and sent[1]:sub(-7, -7) ~= '\r', vim.inspect(sent))
+check('terminal, submit off: focus moves to the terminal window', vim.api.nvim_get_current_win() == win)
 vim.cmd('stopinsert')
 vim.api.nvim_set_current_win(code_win)
+st.config.submit = true
 
 -- A function that decides which terminal is an agent.
 st.config.terminal_pattern = function(name)
@@ -140,25 +169,6 @@ vim.api.nvim_create_user_command('ClaudeCodeAdd', function() end, { nargs = '*',
 check('auto: claudecode wins when its command exists', sender.resolve() == 'claudecode')
 vim.api.nvim_del_user_command('ClaudeCodeAdd')
 check('auto: ... and not otherwise', sender.resolve() == 'clipboard')
-
--- `a` in the panel goes through the same sender --------------------------------------
-st.config.sender = function(msg)
-  got = msg
-end
-got = nil
-local panel_lines = vim.api.nvim_buf_get_lines(st.panel_buf, 0, -1, false)
-local heading
-for i, l in ipairs(panel_lines) do
-  if l:match('^### %[1%]') then
-    heading = i
-  end
-end
-vim.api.nvim_set_current_win(st.panel_win)
-vim.api.nvim_win_set_cursor(st.panel_win, { heading, 0 })
-vim.api.nvim_feedkeys('a', 'x', false)
-check('panel "a" sends the note under the cursor', got ~= nil and got.text:match('Note %[1%] on') ~= nil
-  and got.refs[1].from == 2 and got.prefill == nil, vim.inspect(got))
-vim.api.nvim_set_current_win(code_win)
 
 check(':checkhealth section runs', pcall(require('walkthrough.health').check))
 

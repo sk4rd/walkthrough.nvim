@@ -4,6 +4,7 @@ local st = require('walkthrough.state')
 local git = require('walkthrough.git')
 local anchor = require('walkthrough.anchor')
 local tour = require('walkthrough.tour')
+local compact = require('walkthrough.compact')
 
 local M = {}
 
@@ -43,9 +44,11 @@ end
 --- the line that corresponds to the start of the step's focus. `q` and
 --- `<Esc>` close it.
 function M.show()
-  local step = st.history[st.pos]
+  -- In the compact view: the entry under the cursor, on its line.
+  local entry = compact.target()
+  local step = entry and entry.step or st.history[st.pos]
   if not step then
-    vim.notify('walkthrough: no tour open', vim.log.levels.INFO)
+    vim.notify('walkthrough: no review open', vim.log.levels.INFO)
     return
   end
   local ref = M.ref_of(step)
@@ -58,9 +61,10 @@ function M.show()
   -- The focus start, mapped from the file as it is to the base version.
   pcall(tour.sync, step)
   local target = 1
-  if step.from then
+  local focus = (entry and entry.line) or step.from
+  if focus then
     local hunks = anchor.diff(vim.fn.readfile(step.file), lines)
-    target = (anchor.map_line(hunks, step.from))
+    target = (anchor.map_line(hunks, focus))
   end
   target = math.max(1, math.min(target, math.max(#lines, 1)))
 

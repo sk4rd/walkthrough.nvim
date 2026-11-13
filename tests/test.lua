@@ -16,7 +16,6 @@ local tour = {
       to = 3,
       hunks = hunks,
       notes = { { line = 2, text = 'n1', verdict = 'simplify' }, { line = 8, text = 'n2' } },
-      panel = '# One',
     },
     { file = work .. '/g.txt', title = 'two' },
     { file = work .. '/new.txt', title = 'three', hunks = { { from = 1, to = 2, group = 'A' } } },
@@ -62,6 +61,7 @@ check('patch shows DONE', marks(function(d)
 end) == 1)
 check('patch keeps cursor', vim.api.nvim_win_get_cursor(0)[1] == 8)
 check('patch rejects typo', send('patch', { titel = 'x' }):match('unknown step field') ~= nil)
+check('patch rejects the removed panel field', send('patch', { panel = 'x' }):match('unknown step field "panel"') ~= nil)
 
 -- Reload survival --------------------------------------------------------------
 package.loaded.walkthrough = nil
@@ -118,11 +118,11 @@ local function layout(opts)
   vim.cmd('tabnew')
   vim.bo.buftype = 'nofile'
   local claude = vim.api.nvim_get_current_win()
-  send('load', { file = work .. '/g.txt', panel = '# x' })
+  send('load', { file = work .. '/g.txt' })
   local cols = {}
   for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
     local b = vim.api.nvim_win_get_buf(win)
-    local name = win == claude and 'claude' or (vim.bo[b].filetype == 'markdown' and 'panel' or 'code')
+    local name = win == claude and 'claude' or (b == _G.walkthrough_state.panel_buf and 'panel' or 'code')
     table.insert(cols, { name = name, col = vim.api.nvim_win_get_position(win)[2] })
   end
   table.sort(cols, function(a, b) return a.col < b.col end)
@@ -142,14 +142,14 @@ vim.o.columns = 200
 vim.cmd('tabnew')
 vim.bo.buftype = 'nofile'
 local claude = vim.api.nvim_get_current_win()
-send('load', { file = work .. '/g.txt', panel = '# x' })
+send('load', { file = work .. '/g.txt' })
 vim.api.nvim_win_set_width(claude, 60)
 w.keep_code_wide()
 local function widths()
   local out = {}
   for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
     local b = vim.api.nvim_win_get_buf(win)
-    local name = win == claude and 'claude' or (vim.bo[b].filetype == 'markdown' and 'panel' or 'code')
+    local name = win == claude and 'claude' or (b == _G.walkthrough_state.panel_buf and 'panel' or 'code')
     out[name] = vim.api.nvim_win_get_width(win)
   end
   return out

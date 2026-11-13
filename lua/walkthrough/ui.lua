@@ -1,4 +1,4 @@
--- What the user sees: overlay, notes, panel and window layout.
+-- What the user sees: overlay, notes, the map panel and window layout.
 local state = require('walkthrough.state')
 local git = require('walkthrough.git')
 local tour = require('walkthrough.tour')
@@ -35,6 +35,7 @@ function M.define_highlights()
   vim.api.nvim_set_hl(0, 'WalkthroughRange', { link = 'Visual', default = true })
   vim.api.nvim_set_hl(0, 'WalkthroughBar', { link = 'DiagnosticInfo', default = true })
   vim.api.nvim_set_hl(0, 'WalkthroughNote', { link = 'DiagnosticInfo', default = true })
+  vim.api.nvim_set_hl(0, 'WalkthroughNoteDetail', { link = 'Comment', default = true })
   vim.api.nvim_set_hl(0, 'WalkthroughAdded', { link = 'DiffAdd', default = true })
   vim.api.nvim_set_hl(0, 'WalkthroughRemoved', { link = 'DiffDelete', default = true })
   vim.api.nvim_set_hl(0, 'WalkthroughStaged', { link = 'CursorLine', default = true })
@@ -52,8 +53,19 @@ function M.define_highlights()
   badge('WalkthroughAccepted', 'DiagnosticOk')
   badge('WalkthroughRejected', 'DiagnosticError')
   vim.api.nvim_set_hl(0, 'WalkthroughEvidence', { link = 'Comment', default = true })
-  vim.api.nvim_set_hl(0, 'WalkthroughComment', { link = 'DiagnosticHint', default = true })
-  vim.api.nvim_set_hl(0, 'WalkthroughCommentResolved', { link = 'Comment', default = true })
+  vim.api.nvim_set_hl(0, 'WalkthroughThread', { link = 'DiagnosticHint', default = true })
+  vim.api.nvim_set_hl(0, 'WalkthroughThreadDim', { link = 'Comment', default = true })
+  -- The map panel: the active commit's heading stands out, titles are dim.
+  vim.api.nvim_set_hl(0, 'WalkthroughMapHeading', { link = 'Normal', default = true })
+  vim.api.nvim_set_hl(0, 'WalkthroughMapActive', { link = 'Title', default = true })
+  vim.api.nvim_set_hl(0, 'WalkthroughMapMarker', { link = 'DiagnosticInfo', default = true })
+  vim.api.nvim_set_hl(0, 'WalkthroughMapTitle', { link = 'Comment', default = true })
+  vim.api.nvim_set_hl(0, 'WalkthroughMapSeen', { link = 'Comment', default = true })
+  vim.api.nvim_set_hl(0, 'WalkthroughMapCount', { link = 'Comment', default = true })
+  -- The compact view: file headings, the number column, and what is only context.
+  vim.api.nvim_set_hl(0, 'WalkthroughHeading', { link = 'Title', default = true })
+  vim.api.nvim_set_hl(0, 'WalkthroughGutter', { link = 'LineNr', default = true })
+  vim.api.nvim_set_hl(0, 'WalkthroughDim', { link = 'Comment', default = true })
 end
 
 -- Windows ---------------------------------------------------------------------
@@ -145,7 +157,7 @@ local label = {
     return { ' → ' .. group .. ' ', 'WalkthroughOther' }
   end,
   unassigned = function()
-    return { ' ? not in any group ', 'WalkthroughUnassignedLabel' }
+    return { ' ? not in any commit ', 'WalkthroughUnassignedLabel' }
   end,
   stale = function()
     return { ' ? stale range ', 'WalkthroughUnassignedLabel' }
@@ -258,7 +270,7 @@ local function draw_diff(buf, step)
       end
       if kinds > 1 then
         vim.api.nvim_buf_set_extmark(buf, ns, math.min(first, last) - 1, 0, {
-          virt_text = { { ' ⚠ mixed hunk: stage by selection or stage_group ', 'WalkthroughMixed' } },
+          virt_text = { { ' ⚠ mixed hunk: stage by selection or with :Walkthrough stage ', 'WalkthroughMixed' } },
           virt_text_pos = 'eol',
         })
       end
@@ -294,62 +306,6 @@ local function focus_range(step, buf)
 end
 M.focus_range = focus_range
 
--- Show note number `n` on `line`: a badge at the end of the line, and the
--- text as virtual lines underneath, indented to match the code. `extra` may
--- hold `decision` ('accept' or 'reject', the user's stance) and `evidence`
--- ('ran', 'read' or 'opinion'), shown after the verdict.
-function M.annotate(line, text, n, verdict, stale, extra)
-  extra = extra or {}
-  local buf = code_buf()
-  if line < 1 or line > vim.api.nvim_buf_line_count(buf) then
-    return
-  end
-  local indent = vim.api.nvim_buf_call(buf, function()
-    return vim.fn.indent(line)
-  end)
-  local pad = string.rep(' ', indent)
-  local tag = n and ('[' .. n .. '] ') or '▸ '
-
-  local virt_lines = {}
-  for i, l in ipairs(to_lines(text or '')) do
-    local prefix = i == 1 and tag or string.rep(' ', vim.fn.strdisplaywidth(tag))
-    table.insert(virt_lines, { { pad .. prefix .. l, 'WalkthroughNote' } })
-  end
-
-  local badges = {}
-  if n then
-    table.insert(badges, { ' ' .. n .. ' ', 'WalkthroughBadge' })
-  end
-  if verdict_hl[verdict] then
-    table.insert(badges, { ' ' })
-    table.insert(badges, { ' ' .. verdict:upper() .. ' ', verdict_hl[verdict] })
-  end
-  if extra.decision == 'accept' then
-    table.insert(badges, { ' ' })
-    table.insert(badges, { ' ✓ accepted ', 'WalkthroughAccepted' })
-  elseif extra.decision == 'reject' then
-    table.insert(badges, { ' ' })
-    table.insert(badges, { ' ✗ rejected ', 'WalkthroughRejected' })
-  end
-  if extra.evidence then
-    table.insert(badges, { ' ' .. extra.evidence, 'WalkthroughEvidence' })
-  end
-
-  if stale then
-    table.insert(badges, { ' ' })
-    table.insert(badges, { ' (code changed) ', 'WalkthroughMixed' })
-  end
-
-  vim.api.nvim_buf_set_extmark(buf, ns, line - 1, 0, {
-    virt_lines = virt_lines,
-    virt_text = #badges > 0 and badges or nil,
-    virt_text_pos = 'eol',
-  })
-  if n then
-    st.note_lines[n] = line
-  end
-end
-
 -- Break `text` into lines of at most `width` cells, at spaces where it can.
 -- Virtual lines do not wrap by themselves: what is too long is cut off at the
 -- window's edge.
@@ -384,38 +340,148 @@ local function text_width(buf)
   return vim.api.nvim_win_get_width(win) - vim.fn.getwininfo(win)[1].textoff
 end
 
--- An answer can be long; the code shows its beginning, the panel all of it.
-local max_answer_lines = 6
+-- A long reply or detail is cut after this many lines; the thread float of a
+-- later stage will show the rest.
+local max_text_lines = 6
 
--- A comment of the user: `» c1 question: text` under its last line, then
--- `↳ answer` lines once the agent replied. Resolved ones are dimmed.
-local function draw_comment(buf, c)
-  local row = math.min(c.to, vim.api.nvim_buf_line_count(buf))
-  local indent = vim.api.nvim_buf_call(buf, function()
-    return vim.fn.indent(row)
-  end)
-  local pad = string.rep(' ', indent)
-  local hl = c.resolved and 'WalkthroughCommentResolved' or 'WalkthroughComment'
-  local head = ('» %s %s: '):format(c.id, c.type)
-  local width = text_width(buf) - indent - 1
-  local virt = {}
-  local suffix = c.stale and ' (code changed)' or ''
-  for i, l in ipairs(wrap(c.text, width - vim.fn.strdisplaywidth(head .. suffix))) do
-    local prefix = i == 1 and head or string.rep(' ', vim.fn.strdisplaywidth(head))
-    table.insert(virt, { { pad .. prefix .. l .. (i == 1 and suffix or ''), hl } })
+-- Show note `n` under row `row` of `buf`: a badge at the end of the line, and
+-- the text as virtual lines underneath, after `pad`. See `annotate`.
+local function annotate_at(buf, row, pad, text, n, verdict, stale, extra)
+  extra = extra or {}
+  local indent = #pad
+  local tag = n and ('[' .. n .. '] ') or '▸ '
+
+  local virt_lines = {}
+  for i, l in ipairs(to_lines(text or '')) do
+    local prefix = i == 1 and tag or string.rep(' ', vim.fn.strdisplaywidth(tag))
+    table.insert(virt_lines, { { pad .. prefix .. l, 'WalkthroughNote' } })
   end
-  if c.answer then
-    local lines = wrap(c.answer, width - 4)
-    for i, l in ipairs(lines) do
-      if i > max_answer_lines then
-        table.insert(virt, { { pad .. '    … ' .. (#lines - max_answer_lines) .. ' more lines in the panel', hl } })
+  if extra.detail then
+    local blank = string.rep(' ', vim.fn.strdisplaywidth(tag))
+    local detail = wrap(extra.detail, text_width(buf) - indent - vim.fn.strdisplaywidth(tag) - 1)
+    for i, l in ipairs(detail) do
+      if i > max_text_lines then
+        table.insert(virt_lines, { { pad .. blank .. '… ' .. (#detail - max_text_lines) .. ' more lines', 'WalkthroughNoteDetail' } })
         break
       end
-      table.insert(virt, { { pad .. (i == 1 and '  ↳ ' or '    ') .. l, hl } })
+      table.insert(virt_lines, { { pad .. blank .. l, 'WalkthroughNoteDetail' } })
     end
   end
-  vim.api.nvim_buf_set_extmark(buf, ns, row - 1, 0, { virt_lines = virt })
+
+  local badges = {}
+  if n then
+    table.insert(badges, { ' ' .. n .. ' ', 'WalkthroughBadge' })
+  end
+  if verdict_hl[verdict] then
+    table.insert(badges, { ' ' })
+    table.insert(badges, { ' ' .. verdict:upper() .. ' ', verdict_hl[verdict] })
+  end
+  if extra.decision == 'accept' then
+    table.insert(badges, { ' ' })
+    table.insert(badges, { ' ✓ accepted ', 'WalkthroughAccepted' })
+  elseif extra.decision == 'reject' then
+    table.insert(badges, { ' ' })
+    table.insert(badges, { ' ✗ rejected ', 'WalkthroughRejected' })
+  end
+  if extra.evidence then
+    table.insert(badges, { ' ' .. extra.evidence, 'WalkthroughEvidence' })
+  end
+
+  if stale then
+    table.insert(badges, { ' ' })
+    table.insert(badges, { ' (code changed) ', 'WalkthroughMixed' })
+  end
+
+  vim.api.nvim_buf_set_extmark(buf, ns, row - 1, 0, {
+    virt_lines = virt_lines,
+    virt_text = #badges > 0 and badges or nil,
+    virt_text_pos = 'eol',
+  })
 end
+M.annotate_at = annotate_at
+
+-- Show note number `n` on `line`: a badge at the end of the line, and the
+-- text as virtual lines underneath, indented to match the code. `extra` may
+-- hold `decision` ('accept' or 'reject', the user's stance), `evidence`
+-- ('ran', 'read' or 'opinion'), shown after the verdict, and `detail`, the
+-- longer explanation, wrapped under the text.
+function M.annotate(line, text, n, verdict, stale, extra)
+  local buf = code_buf()
+  if line < 1 or line > vim.api.nvim_buf_line_count(buf) then
+    return
+  end
+  local indent = vim.api.nvim_buf_call(buf, function()
+    return vim.fn.indent(line)
+  end)
+  annotate_at(buf, line, string.rep(' ', indent), text, n, verdict, stale, extra)
+  if n then
+    st.note_lines[n] = line
+  end
+end
+
+-- The short label after a thread's id for the states that need one.
+local state_label = {
+  draft = 'not sent', waiting = 'waiting', proposed = 'proposal', accepted = 'accepted', declined = 'declined',
+  done = 'done',
+}
+
+-- A thread is cut after this many virtual lines; the thread float shows the rest.
+local max_thread_lines = 6
+
+-- The key that opens the thread float, as the user mapped it, else the command.
+local function thread_key()
+  local keys = M.plug_keys().thread
+  return keys and keys[1] or ':Walkthrough thread'
+end
+
+-- A thread of the user: `» t1 you: text` under its last line, then
+-- `↳ answer` lines once the agent replied; a label after the id says where
+-- it stands. Done and declined ones are dimmed. At most 6 lines; a longer
+-- thread ends with a hint for the float.
+local function draw_thread(buf, th, ns_id, at)
+  local row = at and at.row or math.min(th.to, vim.api.nvim_buf_line_count(buf))
+  local pad = at and at.pad
+  if not pad then
+    pad = string.rep(' ', vim.api.nvim_buf_call(buf, function()
+      return vim.fn.indent(row)
+    end))
+  end
+  local indent = #pad
+  local dim = th.state == 'done' or th.state == 'declined'
+  local hl = dim and 'WalkthroughThreadDim' or 'WalkthroughThread'
+  local label = state_label[th.state]
+  local head = ('» %s%s you: '):format(th.id, label and (' (' .. label .. ')') or '')
+  local width = text_width(buf) - indent - 1
+  local suffix = th.stale and ' (code changed)' or ''
+  local lines = {}
+  local user, agent = tour.last_message(th, 'user'), tour.last_message(th, 'agent')
+  if user then
+    for i, l in ipairs(wrap(user.text, width - vim.fn.strdisplaywidth(head .. suffix))) do
+      local prefix = i == 1 and head or string.rep(' ', vim.fn.strdisplaywidth(head))
+      table.insert(lines, prefix .. l .. (i == 1 and suffix or ''))
+    end
+  end
+  if agent then
+    for i, l in ipairs(wrap(agent.text, width - 4)) do
+      table.insert(lines, (i == 1 and '  ↳ ' or '    ') .. l)
+    end
+  end
+  if #lines > max_thread_lines then
+    lines = vim.list_slice(lines, 1, max_thread_lines - 1)
+    table.insert(lines, '    … full thread: ' .. thread_key())
+  end
+  local virt = {}
+  for _, l in ipairs(lines) do
+    table.insert(virt, { { pad .. l, hl } })
+  end
+  vim.api.nvim_buf_set_extmark(buf, ns_id or ns, row - 1, 0, { virt_lines = virt })
+end
+
+--- Draw thread `th` under its last line in `buf`, in namespace `ns_id` (the
+--- full draw's own by default). The thread drawer uses it for the buffers the
+--- full draw does not cover (drawer.lua). `at` ({ row, pad }) puts it under
+--- another row, indented by `pad`: the compact view's lines are not the file's.
+M.draw_thread = draw_thread
 
 -- Remove highlights and notes from every buffer. Panel and history stay.
 function M.clear()
@@ -423,6 +489,7 @@ function M.clear()
     vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
   end
   st.note_lines = {}
+  st.drawn = nil
 end
 
 -- Draw all marks of `step` on the code buffer. Does not move the cursor, so
@@ -444,11 +511,13 @@ function M.draw(step)
     end
     for _, note in ipairs(step.notes or {}) do
       M.annotate(note.line, note.text, note.n, note.verdict, note.stale,
-        { decision = note.decision, evidence = note.evidence })
+        { decision = note.decision, evidence = note.evidence, detail = note.detail })
     end
-    for _, c in ipairs(step.comments or {}) do
-      draw_comment(buf, c)
+    for _, th in ipairs(step.threads or {}) do
+      draw_thread(buf, th)
     end
+    -- The drawer leaves this step's threads in this buffer to us.
+    st.drawn = { buf = buf, step = step }
   end)
   if not ok then
     M.clear()
@@ -456,168 +525,133 @@ function M.draw(step)
   end
 end
 
---- Sync the step with its file, draw it, and bring the panel up to date when
---- a number moved (its headings name the lines). Opens no window.
-function M.redraw(step, pos, count)
-  local moved = tour.sync(step)
+--- Sync the step with its file and draw it. Opens no window.
+function M.redraw(step)
+  tour.sync(step)
   M.draw(step)
-  if moved and st.panel_win and vim.api.nvim_win_is_valid(st.panel_win) then
-    M.show_panel(step, pos, count, true)
-  end
 end
 
---- Draw the current step again after the user's data changed (a comment, a
---- decision, a check): marks only when the code window shows the step's file,
---- and the panel with its cursor kept.
+--- Draw the current step again after the user's data changed (a thread, a
+--- decision): marks only, and only when the code window shows the step's
+--- file. The map's counts, an open thread float and the threads in other
+--- buffers follow.
 function M.update()
   local step = st.history[st.pos]
-  if not step then
-    return
+  if step then
+    pcall(tour.sync, step)
+    local win = st.code_win
+    if M.refresh_compact() then
+      -- The compact view was built again.
+    elseif win and vim.api.nvim_win_is_valid(win)
+      and vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(win)) == vim.fn.fnamemodify(step.file, ':p') then
+      M.draw(step)
+    end
   end
-  pcall(tour.sync, step)
-  local win = st.code_win
-  if win and vim.api.nvim_win_is_valid(win)
-    and vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(win)) == vim.fn.fnamemodify(step.file, ':p') then
-    M.draw(step)
-  end
-  if st.panel_win and vim.api.nvim_win_is_valid(st.panel_win) then
-    M.show_panel(step, st.pos, #st.history, true)
-  end
+  M.update_map()
+  M.refresh_float()
+  M.redraw_threads()
 end
 
--- Panel -----------------------------------------------------------------------
-
--- The heading of the panel section the cursor is in: a note or comment is
--- its `###` heading and the text under it, so "this note" works from
--- anywhere in its text, not only on the heading. Outside the panel it is
--- just the current line.
-local function section_heading()
-  local line = vim.api.nvim_get_current_line()
-  if vim.api.nvim_get_current_buf() ~= st.panel_buf or line:sub(1, 1) == '#' then
-    return line
+--- Build the active tour's compact view again, with the cursor kept, when the
+--- code window shows it. Returns whether it was shown. A failure is reported
+--- as a warning, never raised: background events call this.
+function M.refresh_compact()
+  local t = tours.active()
+  local compact = require('walkthrough.compact')
+  if not (t and compact.shown(t)) then
+    return false
   end
-  local row = vim.api.nvim_win_get_cursor(0)[1]
-  for _, l in ipairs(vim.fn.reverse(vim.api.nvim_buf_get_lines(0, 0, row - 1, false))) do
-    if l:sub(1, 1) == '#' then
-      return l
-    end
+  local ok, err = pcall(compact.rebuild, t)
+  if not ok then
+    vim.notify('walkthrough: ' .. tour.clean_error(err), vim.log.levels.WARN)
   end
-  return line
+  return true
 end
 
-local function note_under_cursor()
-  local n = tonumber(section_heading():match('^### %[(%d+)%]'))
-  return n, n and st.note_lines[n]
-end
-M.note_under_cursor = note_under_cursor
-
---- The id of the comment whose `### (c1)` section the cursor is in.
-function M.comment_under_cursor()
-  return section_heading():match('^### %((c%d+)%)')
-end
-
--- The file a `path:line` in `text` names, found under the repository root or
--- the working directory (or as an absolute path). The reference at column
--- `col` (0-based) wins; else the first one that exists. Returns nil when
--- there is none.
-local function line_reference(text, col)
-  local step = st.history[st.pos]
-  local function resolve(path)
-    local candidates = {}
-    if path:sub(1, 1) == '/' then
-      candidates = { path }
-    elseif path:sub(1, 2) == '~/' then
-      candidates = { vim.fn.expand(path) }
-    else
-      local t = tours.active()
-      local root = step and (t and t.root or require('walkthrough.store').root_of(step.file))
-      candidates = { root and (root .. '/' .. path) or nil, vim.fn.getcwd() .. '/' .. path }
-    end
-    for _, c in ipairs(candidates) do
-      if vim.fn.filereadable(c) == 1 then
-        return vim.fn.fnamemodify(c, ':p')
-      end
-    end
-  end
-  local first
-  local init = 1
-  while true do
-    local s, e, path, lnum = text:find('([%w_%.~/%-][^%s:`"\'()<>%[%]{},;|]*):(%d+)', init)
-    if not s then
-      break
-    end
-    local file = resolve(path)
-    if file then
-      local ref = { file = file, line = tonumber(lnum) }
-      if col >= s - 1 and col <= e - 1 then
-        return ref
-      end
-      first = first or ref
-    end
-    init = e + 1
-  end
-  return first
-end
-
--- <CR> on a `### [n]` heading moves the code to note n; on a line naming
--- `path:line` it opens that file there, in the code window.
-local function jump_to_note()
-  local n, line = note_under_cursor()
-  if n then
-    if line then
-      center(get_code_win(), line)
-    end
-    return
-  end
-  local col = vim.api.nvim_win_get_cursor(0)[2]
-  local ref = line_reference(vim.api.nvim_get_current_line(), col)
-  if not ref then
-    return
-  end
-  local win = get_code_win()
-  vim.api.nvim_win_call(win, function()
-    vim.cmd.edit(vim.fn.fnameescape(ref.file))
+--- Draw the threads of the buffers the full draw does not cover (see
+--- drawer.lua). Never raises.
+function M.redraw_threads()
+  pcall(function()
+    require('walkthrough.drawer').redraw()
   end)
-  center(win, math.max(1, math.min(ref.line, vim.api.nvim_buf_line_count(vim.api.nvim_win_get_buf(win)))))
 end
 
-M.jump_to_note = jump_to_note
-
--- Scroll the panel so note n's `### [n]` heading is at the top.
-local function show_note_in_panel(n)
-  if not (st.panel_win and vim.api.nvim_win_is_valid(st.panel_win)) then
-    return
+--- Redraw the thread float if one is open (see thread.lua). Never loads it.
+function M.refresh_float()
+  local float = package.loaded['walkthrough.thread']
+  if float then
+    pcall(float.refresh)
   end
-  for i, l in ipairs(vim.api.nvim_buf_get_lines(st.panel_buf, 0, -1, false)) do
-    if l:match('^### %[' .. n .. '%]') then
-      vim.api.nvim_win_set_cursor(st.panel_win, { i, 0 })
-      vim.api.nvim_win_call(st.panel_win, function()
-        vim.cmd('normal! zt')
-      end)
-      return
+end
+
+-- Notes -----------------------------------------------------------------------
+
+-- The lines of notes and threads on the file in `buf`, from every loaded
+-- tour that lists it; nil when no tour does. Positions are brought up to date
+-- first, unless the buffer has unsaved changes (they are those of the file).
+local function marked_lines(buf)
+  local name = vim.api.nvim_buf_get_name(buf)
+  if name == '' or vim.bo[buf].buftype ~= '' then
+    return nil
+  end
+  local entries = tours.entries(name)
+  if #entries == 0 then
+    return nil
+  end
+  local last = vim.api.nvim_buf_line_count(buf)
+  local lines = {}
+  for _, e in ipairs(entries) do
+    if not vim.bo[buf].modified then
+      pcall(tour.sync, e.step)
+    end
+    for _, note in ipairs(e.step.notes or {}) do
+      table.insert(lines, math.min(note.line, last))
+    end
+    for _, th in ipairs(e.step.threads or {}) do
+      table.insert(lines, math.min(th.from, last))
     end
   end
+  return lines
 end
 
--- Jump to the next (1) or previous (-1) note from the code cursor, and show
--- its section in the panel.
+-- Jump to the next (1) or previous (-1) note or thread of the file in the
+-- current window, when a loaded tour lists it; else of the code window.
 function M.note(delta)
-  local win = get_code_win()
+  local win = vim.api.nvim_get_current_win()
+  local compact = require('walkthrough.compact')
+  -- In the compact view the lines are its own rows.
+  local info = compact.info_of(vim.api.nvim_win_get_buf(win))
+  if not info then
+    local code = st.code_win
+    if code and vim.api.nvim_win_is_valid(code) and not marked_lines(vim.api.nvim_win_get_buf(win)) then
+      info = compact.info_of(vim.api.nvim_win_get_buf(code))
+      win = info and code or win
+    end
+  end
+  local lines
+  if info then
+    lines = compact.marked_rows(info)
+  else
+    lines = marked_lines(vim.api.nvim_win_get_buf(win))
+    if not lines then
+      win = get_code_win()
+      lines = marked_lines(vim.api.nvim_win_get_buf(win)) or {}
+    end
+  end
   local cur = vim.api.nvim_win_get_cursor(win)[1]
-  local best_n, best_line
-  for n, line in pairs(st.note_lines) do
+  local best_line
+  for _, line in ipairs(lines) do
     local ahead = delta > 0 and line > cur or delta < 0 and line < cur
     local closer = not best_line or (delta > 0 and line < best_line) or (delta < 0 and line > best_line)
     if ahead and closer then
-      best_n, best_line = n, line
+      best_line = line
     end
   end
   if not best_line then
-    vim.notify('walkthrough: no ' .. (delta < 0 and 'earlier' or 'later') .. ' note', vim.log.levels.INFO)
+    vim.notify('walkthrough: no ' .. (delta < 0 and 'earlier' or 'later') .. ' thread or finding', vim.log.levels.INFO)
     return
   end
   center(win, best_line)
-  show_note_in_panel(best_n)
 end
 
 -- Keep the code window at least `code_min_ratio` of the screen wide. Space
@@ -695,10 +729,18 @@ function M.plug_keys()
   return keys
 end
 
+-- Panel -----------------------------------------------------------------------
+--
+-- The panel is the map: the loaded tours of the repository, each a heading
+-- with its steps below. A step is its file, the lines of the reviewed group
+-- that are staged, and its title on the next line. The buffer is a plain
+-- scratch buffer; the colors are extmarks.
+
+local map_ns = vim.api.nvim_create_namespace('walkthrough_map')
+
 -- The panel's own keys, local to its buffer (the buffer is not modifiable, so
 -- single keys are free). `keys` are the lhs, `label` the hint and the cheat
--- sheet's text, `check` marks the ones that exist only on a step with a check.
--- Motion and search keys (n, q, j, k, /) are left alone.
+-- sheet's text. Motion and search keys (n, q, j, k, /) are left alone.
 local function lazy(module, fn, ...)
   local args = { ... }
   return function()
@@ -706,45 +748,32 @@ local function lazy(module, fn, ...)
   end
 end
 M.panel_keys = {
-  { keys = { '<CR>' }, label = 'jump to note', desc = 'Jump to note in code', run = function() M.jump_to_note() end },
-  { keys = { 'a' }, label = 'ask', desc = 'Ask the agent about this note', run = lazy('send', 'ask_panel') },
-  { keys = { '-' }, label = 'simpler', desc = 'Ask for a simpler explanation', run = lazy('feedback', 'explain', 'simpler') },
-  { keys = { '+', '=' }, label = 'deeper', desc = 'Ask for a deeper explanation', run = lazy('feedback', 'explain', 'deeper') },
-  { keys = { 'r' }, label = 'reveal', desc = 'Reveal the answer of the check', check = true, run = lazy('feedback', 'check', 'reveal') },
-  { keys = { 'e' }, label = 'answer', desc = 'Write your answer to the check', check = true, run = lazy('feedback', 'check', 'answer') },
-  { keys = { 's' }, label = 'stage', desc = 'Stage the group in this file', run = lazy('stage', 'stage_group') },
-  { keys = { 'S' }, label = 'stage all', desc = 'Stage the group in every file of the tour', run = lazy('stage', 'stage_group', { all = true }) },
-  { keys = { 'y' }, label = 'accept', desc = 'Accept the verdict of this note', run = lazy('feedback', 'decide', 'accept') },
-  { keys = { 'd' }, label = 'decline', desc = 'Decline the verdict of this note', run = lazy('feedback', 'decide', 'reject') },
-  { keys = { 'u' }, label = 'clear decision', desc = 'Clear the decision on this note', run = lazy('feedback', 'decide', 'clear') },
-  { keys = { 'm' }, label = 'send', desc = 'Send comments, decisions and answers to the agent', run = lazy('feedback', 'send') },
+  { keys = { '<CR>' }, label = 'open', desc = 'Open the entry under the cursor', run = function() M.open_under_cursor() end },
+  { keys = { 's' }, label = 'stage', desc = 'Stage the commit in this file', run = lazy('stage', 'stage_group') },
+  { keys = { 'S' }, label = 'stage all', desc = 'Stage the commit in every file', run = lazy('stage', 'stage_group', { all = true }) },
+  { keys = { 'm' }, label = 'send', desc = 'Send collected change requests and decisions to the agent', run = lazy('feedback', 'send') },
   { keys = { 'b' }, label = 'base view', desc = 'Show the file as it was before the change', run = lazy('base', 'show') },
-  { keys = { 'x' }, label = 'reject group', desc = "Discard the group's unstaged lines in this file", run = lazy('reject', 'reject_group') },
+  { keys = { 'x' }, label = 'reject', desc = "Discard the commit's unstaged lines in this file", run = lazy('reject', 'reject_group') },
   { keys = { '?' }, label = 'all keys', desc = 'Show all keys', run = lazy('keys', 'show') },
 }
 
 -- Key hints name only keys that exist: the panel's own keys, and the key of
 -- the cheat sheet. Every other key is in the cheat sheet (keys.lua).
-local function hint_parts(step)
-  local parts = { '<CR> jump to note', 'a ask', '- simpler', '+ deeper' }
-  if step and step.check then
-    vim.list_extend(parts, { 'r reveal', 'e answer' })
-  end
-  table.insert(parts, '? all keys')
-  return parts
+local function hint_parts()
+  return { '<CR> open', 's stage', 'S stage all', '? all keys' }
 end
 
--- `%<` marks where a too long bar is cut: in the hints, never in the step
+-- `%<` marks where a too long bar is cut: in the hints, never in the group
 -- and progress in front of them.
-local function key_hints(step)
-  return '%<%#Comment#  ' .. table.concat(hint_parts(step), ' · '):gsub('%%', '%%%%')
+local function key_hints()
+  return '%<%#Comment#  ' .. table.concat(hint_parts(), ' · '):gsub('%%', '%%%%')
 end
 
 -- When the bar does not fit the panel, its hints are cut off. They are then
 -- repeated under the panel text, wrapped to the panel's width, as virtual
--- lines: the buffer text stays what the agent wrote.
+-- lines: the buffer text stays what the map says.
 local footer_ns = vim.api.nvim_create_namespace('walkthrough_panel')
-local function panel_footer(step, bar)
+local function panel_footer(bar)
   local win, buf = st.panel_win, st.panel_buf
   local width = vim.api.nvim_win_get_width(win)
   local last = vim.api.nvim_buf_line_count(buf)
@@ -765,7 +794,7 @@ local function panel_footer(step, bar)
     return
   end
   local lines, cur = { {} }, ''
-  for _, part in ipairs(hint_parts(step)) do
+  for _, part in ipairs(hint_parts()) do
     local add = (cur == '' and '' or ' · ') .. part
     if cur ~= '' and vim.fn.strdisplaywidth(cur .. add) > width - 1 then
       table.insert(lines, {})
@@ -778,34 +807,56 @@ local function panel_footer(step, bar)
   vim.api.nvim_buf_set_extmark(buf, footer_ns, last - 1, 0, { virt_lines = lines })
 end
 
--- Show `text` (markdown) in a scratch split next to the code.
-function M.panel(text, keep_cursor)
+-- The window the panel is split off: the code window, else the first window
+-- showing a normal file (without making it the code window: a map opened by
+-- itself changes nothing about the code), else a code window is made.
+local function panel_anchor()
+  if st.code_win and vim.api.nvim_win_is_valid(st.code_win)
+    and vim.api.nvim_win_get_tabpage(st.code_win) == vim.api.nvim_get_current_tabpage() then
+    return st.code_win
+  end
+  for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    if win ~= st.panel_win and vim.bo[vim.api.nvim_win_get_buf(win)].buftype == '' then
+      return win
+    end
+  end
+  return get_code_win()
+end
+
+-- The panel's buffer and window, created when missing.
+local function ensure_panel()
   if not (st.panel_buf and vim.api.nvim_buf_is_valid(st.panel_buf)) then
     st.panel_buf = vim.api.nvim_create_buf(false, true) -- unlisted scratch buffer
-    vim.bo[st.panel_buf].filetype = 'markdown'
     vim.bo[st.panel_buf].bufhidden = 'hide'
     for _, k in ipairs(M.panel_keys) do
-      if not k.check then
-        for _, lhs in ipairs(k.keys) do
-          vim.keymap.set('n', lhs, M.safe(k.run), { buffer = st.panel_buf, desc = 'Walkthrough: ' .. k.desc })
-        end
+      for _, lhs in ipairs(k.keys) do
+        vim.keymap.set('n', lhs, M.safe(k.run), { buffer = st.panel_buf, desc = 'Walkthrough: ' .. k.desc })
       end
     end
   end
   if not (st.panel_win and vim.api.nvim_win_is_valid(st.panel_win)) then
     st.panel_win = vim.api.nvim_open_win(st.panel_buf, false, {
       split = st.config.panel_side,
-      win = get_code_win(),
+      win = panel_anchor(),
       width = st.config.panel_width,
     })
-    vim.wo[st.panel_win].wrap = true
-    vim.wo[st.panel_win].linebreak = true
+    -- The map fits the width by itself (see layout_map).
+    vim.wo[st.panel_win].wrap = false
+    vim.wo[st.panel_win].cursorline = true
     vim.wo[st.panel_win].number = false
     vim.wo[st.panel_win].relativenumber = false
     vim.wo[st.panel_win].signcolumn = 'no'
     vim.wo[st.panel_win].winbar = key_hints()
   end
+end
 
+--- Show `text` (a string or a list of lines) in a scratch split next to the
+--- code. The map panel uses it; text of your own stays until the next step.
+function M.panel(text, keep_cursor)
+  ensure_panel()
+  -- Highlights and rows belong to the map that was there.
+  vim.api.nvim_buf_clear_namespace(st.panel_buf, map_ns, 0, -1)
+  st.map_rows = {}
   local cursor = keep_cursor and vim.api.nvim_win_get_cursor(st.panel_win)[1] or 1
   vim.bo[st.panel_buf].modifiable = true
   vim.api.nvim_buf_set_lines(st.panel_buf, 0, -1, false, to_lines(text))
@@ -814,21 +865,197 @@ function M.panel(text, keep_cursor)
   M.keep_code_wide()
 end
 
--- Staged lines of the reviewed group over the whole tour, computed apart from
+-- The path of a step's file as the map shows it: relative to the repository
+-- root, else to the working directory.
+local function relative_path(root, file)
+  local abs = vim.fn.fnamemodify(file, ':p')
+  if root then
+    for _, candidate in ipairs({ abs, vim.uv.fs_realpath(abs) or abs }) do
+      if vim.startswith(candidate, root .. '/') then
+        return candidate:sub(#root + 2)
+      end
+    end
+  end
+  return vim.fn.fnamemodify(abs, ':~:.')
+end
+
+-- `text` cut from the left to `room` cells, so the end (the file name) stays.
+local function fit(text, room)
+  room = math.max(room, 1)
+  if vim.fn.strdisplaywidth(text) <= room then
+    return text
+  end
+  local n = vim.fn.strchars(text)
+  local keep = n
+  repeat
+    keep = keep - 1
+  until keep <= 1 or vim.fn.strdisplaywidth('…' .. vim.fn.strcharpart(text, n - keep)) <= room
+  return '…' .. vim.fn.strcharpart(text, n - keep)
+end
+
+-- The repository the map shows: the one of the tour on screen, else of the
+-- file in the current window when a loaded tour lists it, else of the first
+-- loaded tour.
+local function map_root()
+  local active = tours.active()
+  if active then
+    return active.root
+  end
+  local buf = vim.api.nvim_get_current_buf()
+  local name = vim.api.nvim_buf_get_name(buf)
+  if name ~= '' and vim.bo[buf].buftype == '' then
+    local e = tours.entries(name)[1]
+    if e and not e.t.plan then
+      return e.t.root
+    end
+  end
+  -- A plan review is in no map.
+  for _, t in ipairs(st.tours) do
+    if not t.plan then
+      return t.root
+    end
+  end
+end
+
+-- The map of the tours that belong to one repository (see map_root) as
+-- `lines`, the `marks` that color them ({ row, col, end_col, hl }, 0-based),
+-- the `rows` that <CR> opens (line -> { tour, step }; `step` is nil on a
+-- heading) and `current`, the line of the shown step. `pos` is the shown step
+-- of the active tour. `Other files`, the tour of threads on files no change
+-- lists, comes last with each entry's path and nothing else. Pure: it reads
+-- the state and draws nothing.
+function M.layout_map(pos, width)
+  local active = tours.active()
+  local root = map_root()
+  local lines, marks, rows, current = {}, {}, {}, nil
+  if not root then
+    return lines, marks, rows, current
+  end
+  local function add(text)
+    table.insert(lines, text)
+    return #lines
+  end
+  local mine = tours.in_root(root)
+  for _, t in ipairs(mine) do
+    local ti
+    for i, x in ipairs(st.tours) do
+      if x == t then
+        ti = i
+      end
+    end
+    local is_active = t == active
+    local progress = st.progress and st.progress[t]
+    local n = add((t.extra and tours.OTHER or t.group or 'Changes'):gsub('%s+', ' '))
+    table.insert(marks, { n - 1, 0, #lines[n], is_active and 'WalkthroughMapActive' or 'WalkthroughMapHeading' })
+    rows[n] = { tour = ti }
+    for si, step in ipairs(t.steps) do
+      local shown = is_active and si == (pos or t.pos)
+      -- Marker, seen mark, file name: the names start where the titles do.
+      local prefix = (shown and '>' or ' ') .. ' ' .. (step.seen and '✓' or ' ') .. ' '
+      local counts
+      local per_file = progress and progress.files[vim.fn.fnamemodify(step.file, ':p')]
+      if step.hunks and step.diff == true and per_file then
+        counts = ('%d/%d'):format(per_file.staged, per_file.total)
+      end
+      local room = width - 1 - vim.fn.strdisplaywidth(prefix) - (counts and (#counts + 1) or 0)
+      local path = fit(relative_path(t.root, step.file), room)
+      local line = prefix .. path
+      if counts then
+        line = line .. string.rep(' ', width - 1 - vim.fn.strdisplaywidth(line) - #counts) .. counts
+      end
+      local row = add(line)
+      rows[row] = { tour = ti, step = si }
+      if shown then
+        current = row
+        table.insert(marks, { row - 1, 0, 1, 'WalkthroughMapMarker' })
+      end
+      if step.seen then
+        table.insert(marks, { row - 1, 2, 2 + #'✓', 'WalkthroughMapSeen' })
+      end
+      if counts then
+        table.insert(marks, { row - 1, #line - #counts, #line, 'WalkthroughMapCount' })
+      end
+      if step.title and vim.trim(step.title) ~= '' then
+        for _, l in ipairs(wrap(step.title, width - 5)) do
+          local title_row = add('    ' .. l)
+          rows[title_row] = { tour = ti, step = si }
+          table.insert(marks, { title_row - 1, 4, #lines[title_row], 'WalkthroughMapTitle' })
+        end
+      end
+    end
+  end
+  -- The threads of the repository, as a last line: what waits for the agent
+  -- and for the user.
+  local counts = tours.thread_counts(mine)
+  local parts = {}
+  for _, c in ipairs({
+    { 'waiting', 'waiting', 'waiting' }, { 'proposed', 'proposal', 'proposals' }, { 'draft', 'not sent', 'not sent' },
+  }) do
+    local n = counts[c[1]]
+    if n then
+      table.insert(parts, ('%d %s'):format(n, n == 1 and c[2] or c[3]))
+    end
+  end
+  if #parts > 0 then
+    local n = add(table.concat(parts, ' · '))
+    table.insert(marks, { n - 1, 0, #lines[n], 'WalkthroughMapCount' })
+  end
+  return lines, marks, rows, current
+end
+
+--- Draw the map in the panel (opening it when needed). The cursor goes to the
+--- shown step, unless `keep_cursor` asks to leave it where it is.
+function M.show_map(pos, keep_cursor)
+  ensure_panel()
+  local width = vim.api.nvim_win_get_width(st.panel_win)
+  local lines, marks, rows, current = M.layout_map(pos, width)
+  M.panel(#lines > 0 and lines or { '' }, keep_cursor)
+  st.map_rows, st.map_width = rows, width
+  for _, m in ipairs(marks) do
+    vim.api.nvim_buf_set_extmark(st.panel_buf, map_ns, m[1], m[2], { end_col = m[3], hl_group = m[4] })
+  end
+  if current and not keep_cursor then
+    vim.api.nvim_win_set_cursor(st.panel_win, { current, 0 })
+  end
+  M.update_winbar()
+end
+
+--- Redraw the map where the panel is open, with the cursor kept. Never opens
+--- a window: background events call it.
+function M.update_map()
+  if st.panel_win and vim.api.nvim_win_is_valid(st.panel_win) then
+    M.show_map(nil, true)
+  end
+end
+
+--- Redraw the map when the panel has another width than the one it was laid
+--- out for.
+function M.refit_map()
+  if st.panel_win and vim.api.nvim_win_is_valid(st.panel_win)
+    and vim.api.nvim_win_get_width(st.panel_win) ~= st.map_width then
+    M.update_map()
+  end
+end
+
+-- Staged lines of every loaded tour of the repository, computed apart from
 -- the winbar (it costs git calls, and the winbar is redrawn on every key).
 -- Several things can ask at once, so one run serves them all.
 local progress_pending = false
 function M.refresh_progress(now)
   local function run()
     progress_pending = false
-    local t = tours.active()
-    local ok, res = pcall(function()
-      return t and require('walkthrough.progress').compute(t)
-    end)
-    st.progress = ok and res and { tour = t, staged = res.staged, total = res.total } or nil
-    if t then
-      M.update_winbar(t.steps[t.pos], t.pos, #t.steps)
+    local active = tours.active()
+    local progress = {}
+    for _, t in ipairs(st.tours) do
+      if active and t.root == active.root then
+        local ok, res = pcall(function()
+          return require('walkthrough.progress').compute(t)
+        end)
+        progress[t] = ok and res or nil
+      end
     end
+    st.progress = progress
+    M.update_map()
   end
   if now then
     run()
@@ -838,175 +1065,185 @@ function M.refresh_progress(now)
   end
 end
 
--- Progress for the panel's own winbar: `Step n/total · group · seen a/b ·
--- staged x/y · title`, key hints, and a notice while the code buffer has
--- unsaved changes (the overlay is paused then). The code window's winbar is
--- not touched.
-function M.update_winbar(step, pos, count)
-  if not (step and st.panel_win and vim.api.nvim_win_is_valid(st.panel_win)) then
+-- The panel's own winbar: the tour's group (`Changes` for the unnamed one),
+-- `staged x/y` and `seen a/b`, key hints, and a notice while the code buffer
+-- has unsaved changes (the overlay is paused then). The code window's winbar
+-- is not touched.
+function M.update_winbar()
+  local active = tours.active()
+  if not (active and st.panel_win and vim.api.nvim_win_is_valid(st.panel_win)) then
     return
   end
   local function esc(s)
     return (s:gsub('%%', '%%%%'))
   end
-  local total = math.max(step.total or 0, count)
-  local parts = { ('%%#WalkthroughBadge# Step %d/%d %%*'):format(pos, total) }
+  local parts = { ('%%#WalkthroughBadge# %s %%*'):format(esc(active.extra and tours.OTHER or active.group or 'Changes')) }
   local function add(text)
     table.insert(parts, ' · ' .. text)
   end
-  if step.group then
-    add(esc(step.group))
+  local p = st.progress and st.progress[active]
+  if p then
+    add(('staged %d/%d'):format(p.staged, p.total))
   end
-  local active = tours.active()
-  if active then
-    add(('seen %d/%d'):format(tours.seen_count(active), #active.steps))
-    local p = st.progress
-    if p and p.tour == active then
-      add(('staged %d/%d'):format(p.staged, p.total))
-    end
-  end
-  add(esc(step.title or vim.fn.fnamemodify(step.file, ':~:.')))
+  add(('seen %d/%d'):format(tours.seen_count(active), #active.steps))
   local buf = st.code_win and vim.api.nvim_win_is_valid(st.code_win) and vim.api.nvim_win_get_buf(st.code_win)
-  if buf and vim.bo[buf].modified then
+  -- In the compact view the code window shows no file: any file of the tour
+  -- with unsaved changes counts.
+  local dirty = buf and (active.compact and active.compact.buf == buf
+    and require('walkthrough.compact').dirty(active) or vim.bo[buf].modified)
+  if dirty then
     table.insert(parts, '  %#WalkthroughMixed# unsaved changes: save to refresh %*')
   end
-  table.insert(parts, key_hints(step))
+  table.insert(parts, key_hints())
   -- Typing calls this on every key; skip the write when nothing changed.
   local bar = table.concat(parts)
   if vim.wo[st.panel_win].winbar ~= bar then
     vim.wo[st.panel_win].winbar = bar
   end
   if st.panel_buf and vim.api.nvim_buf_is_valid(st.panel_buf) then
-    panel_footer(step, bar)
+    panel_footer(bar)
   end
 end
 
--- The panel text: the step's own explanation, then one section per note so
--- every inline badge has a matching heading. A step with neither still gets
--- its title, so the panel never shows the previous step's text.
-function M.panel_text(step)
-  local lines = step.panel and vim.deepcopy(to_lines(step.panel)) or {}
-  local function section(title)
-    if #lines > 0 then
-      table.insert(lines, '')
-    end
-    table.insert(lines, title)
+--- Open the step the map line `row` belongs to: the tour becomes the active
+--- one when needed, and the step is shown in the code window. On a heading
+--- the tour shows the step where it was left. A step that cannot be shown
+--- leaves everything as it was.
+function M.open_entry(row)
+  local target = (st.map_rows or {})[row]
+  local t = target and st.tours[target.tour]
+  if not t then
+    return
   end
-
-  local check = step.check
-  if check then
-    section('## Check')
-    vim.list_extend(lines, to_lines(check.question))
-    if check.reply then
-      vim.list_extend(lines, { '', '### Your answer' })
-      vim.list_extend(lines, to_lines(check.reply))
-    end
-    if check.feedback then
-      vim.list_extend(lines, { '', '### Feedback' })
-      vim.list_extend(lines, to_lines(check.feedback))
-    end
-    -- The answer is not in the buffer until the user asks for it.
-    if check.revealed and check.answer then
-      vim.list_extend(lines, { '', '### Answer' })
-      vim.list_extend(lines, to_lines(check.answer))
-    end
+  local si = target.step or t.pos
+  local step = t.steps[si]
+  if not step then
+    return
   end
-
-  local notes = step.notes or {}
-  if #notes > 0 then
-    section('## Notes')
-    for _, note in ipairs(notes) do
-      local head = ('### [%d] line %d'):format(note.n, note.line)
-      if note.stale then
-        head = head .. ' (code changed)'
-      end
-      if note.verdict then
-        head = head .. ' · ' .. note.verdict
-      end
-      if note.evidence then
-        head = head .. ' · ' .. note.evidence
-      end
-      if note.decision then
-        head = head .. ' · ' .. (note.decision == 'accept' and '✓ accepted' or '✗ rejected')
-      end
-      vim.list_extend(lines, { '', head })
-      vim.list_extend(lines, to_lines(note.detail or note.text or ''))
+  local prev_active, prev_pos = st.active, t.pos
+  st.active, t.pos = target.tour, si
+  local ok, err = pcall(M.render, step, si)
+  if not ok then
+    st.active, t.pos = prev_active, prev_pos
+    local back = tours.active()
+    if not (back and back.steps[back.pos] and pcall(M.render, back.steps[back.pos], back.pos)) then
+      M.clear()
     end
+    error(err, 0)
   end
-
-  local comments = step.comments or {}
-  if #comments > 0 then
-    section('## Your comments')
-    for _, c in ipairs(comments) do
-      local where = c.to > c.from and ('%d-%d'):format(c.from, c.to) or tostring(c.from)
-      local head = ('### (%s) line %s · %s'):format(c.id, where, c.type)
-      if c.stale then
-        head = head .. ' (code changed)'
-      end
-      if c.resolved then
-        head = head .. ' · resolved'
-      end
-      vim.list_extend(lines, { '', head })
-      vim.list_extend(lines, to_lines(c.text))
-      if c.answer then
-        local answer = to_lines(c.answer)
-        for i, l in ipairs(answer) do
-          table.insert(lines, (i == 1 and '↳ ' or '  ') .. l)
-        end
-      end
-    end
-  end
-  if #lines == 0 then
-    lines = { '# ' .. (step.title or vim.fn.fnamemodify(step.file, ':~:.')) }
-  end
-  return lines
+  require('walkthrough.store').save(t.root)
 end
 
--- `r` and `e` exist in the panel only while the step has a check.
-local function set_check_keys(step)
-  for _, k in ipairs(M.panel_keys) do
-    if k.check then
-      for _, lhs in ipairs(k.keys) do
-        if step.check then
-          vim.keymap.set('n', lhs, M.safe(k.run), { buffer = st.panel_buf, desc = 'Walkthrough: ' .. k.desc })
-        else
-          pcall(vim.keymap.del, 'n', lhs, { buffer = st.panel_buf })
-        end
-      end
-    end
-  end
+--- <CR> in the panel: open the step under the cursor.
+function M.open_under_cursor()
+  M.open_entry(vim.api.nvim_win_get_cursor(0)[1])
 end
 
-function M.show_panel(step, pos, count, keep_cursor)
-  M.panel(M.panel_text(step), keep_cursor)
-  set_check_keys(step)
-  M.update_winbar(step, pos, count)
+--- Show the map panel, or hide it when it is open. Changes nothing about the
+--- code window or the shown step. Says so when no tour is loaded.
+function M.toggle_map()
+  if st.panel_win and vim.api.nvim_win_is_valid(st.panel_win) then
+    pcall(vim.api.nvim_win_close, st.panel_win, true)
+    st.panel_win = nil
+    return
+  end
+  if tours.count() == 0 then
+    vim.notify('walkthrough: nothing to show: no review and no thread yet', vim.log.levels.INFO)
+    return
+  end
+  M.show_map(nil)
+  M.refresh_progress()
 end
 
 -- Clear everything and close the panel; forget every loaded tour (the saved
 -- state on disk stays, see store.lua).
 function M.close()
+  -- The window goes back to a file, at the line the cursor was on.
+  pcall(function()
+    require('walkthrough.compact').leave()
+  end)
   M.clear()
+  pcall(function()
+    require('walkthrough.drawer').clear()
+  end)
   if st.panel_win and vim.api.nvim_win_is_valid(st.panel_win) then
     vim.api.nvim_win_close(st.panel_win, true)
   end
   st.panel_win = nil
   st.progress = nil
+  st.map_rows = {}
   tours.clear()
 end
 
 -- Steps -----------------------------------------------------------------------
 
---- Open the step's file, draw it, move to its focus and fill the panel.
---- `pos` and `count` are the step's place in the tour, for the winbar.
-function M.render(step, pos, count)
+-- The view a tour opens in: its own choice (`view`), else the `view` option;
+-- never the compact one for `Other files`.
+function M.view_of(t)
+  if t and t.extra then
+    return 'file'
+  end
+  return (t and t.view) or st.config.view or 'compact'
+end
+
+--- The view the code window shows for tour `t` now: 'compact' when it shows
+--- the tour's compact buffer, 'file' when it shows anything else; the view
+--- the tour was shown in last, else the one it would open in, when there is
+--- no code window.
+function M.current_view(t)
+  local win = st.code_win
+  if t and win and vim.api.nvim_win_is_valid(win) then
+    if t.compact and t.compact.buf == vim.api.nvim_win_get_buf(win) then
+      return 'compact'
+    end
+    return 'file'
+  end
+  return t and t.shown or M.view_of(t)
+end
+
+-- What every view does once it is on screen: the step counts as seen, the
+-- map follows.
+local function shown(step, pos)
+  step.seen = true
+  M.show_map(pos)
+  M.keep_code_wide()
+  M.refresh_progress()
+  -- The step before may have covered a buffer that no longer is the code.
+  M.redraw_threads()
+end
+
+--- Show a step in its tour's view (see `view_of`). `pos` is the step's place
+--- in its tour, which the map marks. Returns the view used.
+---
+--- File view: open the step's file, draw it, move to its focus (or to
+--- `opts.line`). Compact view (compact.lua): the tour's buffer, the cursor
+--- on the step's heading (or on `opts.target`, { si, line }); a tour with
+--- nothing to show there is shown in the file view, and `opts.explicit` says
+--- why. `opts.view` overrides the tour's view; `opts.reuse` keeps a compact
+--- buffer that is still current.
+function M.render(step, pos, opts)
+  opts = opts or {}
   tour.check_file(step)
+  local t = tours.active()
+  local compact = require('walkthrough.compact')
+  compact.sweep()
+  if (opts.view or M.view_of(t)) == 'compact' and t then
+    local ok, why = compact.render(t, step, pos, opts)
+    if ok then
+      t.shown = 'compact'
+      shown(step, pos)
+      return 'compact'
+    end
+    if opts.explicit and why then
+      vim.notify('walkthrough: ' .. why, vim.log.levels.INFO)
+    end
+  end
   local win = get_code_win()
   vim.api.nvim_win_call(win, function()
     -- `:edit` on the shown file with unsaved changes fails with E37, and
     -- there is nothing to load then: the buffer is what the user is editing.
-    local shown = vim.api.nvim_buf_get_name(0) == vim.fn.fnamemodify(step.file, ':p')
-    if not (shown and vim.bo.modified) then
+    local on_screen = vim.api.nvim_buf_get_name(0) == vim.fn.fnamemodify(step.file, ':p')
+    if not (on_screen and vim.bo.modified) then
       vim.cmd.edit(vim.fn.fnameescape(step.file))
     end
     -- `:edit` keeps an already loaded buffer as is; pick up changes made on
@@ -1018,15 +1255,19 @@ function M.render(step, pos, count)
     end
   end)
   M.draw(step)
-  local from = focus_range(step, code_buf())
+  local buf = code_buf()
+  local from = focus_range(step, buf)
+  if opts.line then
+    from = math.max(1, math.min(opts.line, vim.api.nvim_buf_line_count(buf)))
+  end
   if from then
     center(win, from)
   end
-  -- Shown to the user: the review state counts it from now on.
-  step.seen = true
-  M.show_panel(step, pos, count)
-  M.keep_code_wide()
-  M.refresh_progress()
+  if t then
+    t.shown = 'file'
+  end
+  shown(step, pos)
+  return 'file'
 end
 
 return M

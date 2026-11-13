@@ -64,7 +64,7 @@ check('load', send('load', { group = 'A', steps = {
 w.step(1)
 local data = saved(root)
 check('the file is named by the sha256 of the root', vim.fn.filereadable(st.config.state_dir .. '/' .. vim.fn.sha256(root) .. '.json') == 1)
-check('format: version, root, active, tours', data and data.version == 1 and data.root == root and data.active == 'A' and #data.tours == 1, vim.inspect(data))
+check('format: version, root, active, tours', data and data.version == 2 and data.root == root and data.active == 'A' and #data.tours == 1, vim.inspect(data))
 local t = data and data.tours[1]
 check('format: all step fields incl. internal ones', t and t.pos == 2 and t.steps[1]._snap[1] == 'l1' and t.steps[1].seen == true
   and t.steps[1].notes[1].n == 1 and t.steps[1].next_note == 2 and t.steps[2].seen == true, vim.inspect(t))
@@ -87,7 +87,8 @@ check('resume: the range followed the edit', st.history[1].hunks[1].from == 5 an
 check('resume: the note is drawn on its new line', H.marks(function(d, m)
   return m[2] == 6 and d.virt_lines ~= nil and d.virt_lines[1][1][1]:match('%[1%] five') ~= nil
 end, vim.fn.bufnr(a)) == 1)
-check('resume: the panel is shown', H.panel_text() ~= '' and H.panel_winbar():match('Step 1/2') ~= nil, H.panel_winbar())
+check('resume: the map is shown, with the marker on the step shown', H.panel_text() == 'A\n> ✓ a.txt\n    a\n  ✓ b.txt\n    b'
+  and H.panel_winbar():match('seen 2/2') ~= nil, H.panel_text() .. H.panel_winbar())
 check('resume: nothing was added twice', #st.tours == 1)
 
 -- Resume with nothing saved / outside any state --------------------------------------
@@ -234,6 +235,85 @@ send('load', { group = 'P', steps = { { file = plain .. '/p.txt' } } })
 check('no repository: root is the directory', saved(vim.fn.fnamemodify(plain .. '/p.txt', ':p:h')) ~= nil)
 w.close()
 check('no repository: resume works', w.resume() == 'ok' and status().group == 'P')
+reset()
+
+-- A state file of format 1 is migrated -----------------------------------------------
+-- Written by hand as an older version wrote it: steps carry `panel` and
+-- `check`; everything else must survive.
+reset()
+local old_repo = H.repo({ ['a.txt'] = lines(6), ['b.txt'] = lines(3, 'b') },
+  { ['a.txt'] = edited(lines(6), 2, 2, 'NEW') })
+cd(old_repo)
+local old_root = store.root_of(old_repo .. '/a.txt')
+local format1 = ([[{"version":1,"root":"%s","active":"A","tours":[{"group":"A","pos":1,"depth":"deeper","next_comment":6,
+"steps":[
+{"file":"%s/a.txt","title":"first","group":"A","diff":true,"seen":true,
+ "panel":"# One\n\nan explanation","check":{"question":"q?","answer":"a","revealed":true,"reply":"mine","reply_sent":true},
+ "hunks":[{"from":2,"to":2,"group":"A"}],"notes":[{"line":2,"text":"n","detail":"d","n":1}],"next_note":2,
+ "comments":[
+  {"id":"c1","from":3,"to":3,"type":"question","text":"why?"},
+  {"id":"c2","from":4,"to":5,"type":"issue","text":"bug here","sent":true},
+  {"id":"c3","from":2,"to":2,"type":"suggestion","text":"use a loop","sent":true,"answer":["agreed","will do"]},
+  {"id":"c4","from":6,"to":6,"type":"question","text":"and this?","sent":true,"answer":"because","resolved":true},
+  {"id":"c5","from":1,"to":1,"type":"question","text":"first line?","sent":true,"answer":"yes","stale":true}],
+ "_snap":["l1","NEW2","l3","l4","l5","l6"]},
+{"file":"%s/b.txt","title":"second","group":"A","panel":["# Two","text"],"_snap":["b1","b2","b3"]}
+]}]}]]):format(old_root, old_root, old_root)
+vim.fn.mkdir(st.config.state_dir, 'p')
+vim.fn.writefile({ format1 }, store.path(old_root))
+check('format 1: resume reads it', w.resume() == 'ok', w.resume())
+local step1, step2 = st.history[1], st.history[2]
+check('format 1: panel and check are dropped from every step', step1 and step2 and step1.panel == nil and step1.check == nil
+  and step2.panel == nil, vim.inspect(st.history))
+check('format 1: everything else is kept', step1.title == 'first' and step1.seen == true and step1.hunks[1].from == 2
+  and step1.notes[1].detail == 'd' and step1.notes[1].n == 1
+  and st.tours[1].depth == 'deeper' and step2.title == 'second', vim.inspect(st.tours[1]))
+local function thread(id)
+  for _, x in ipairs(step1.threads or {}) do
+    if x.id == id then
+      return x
+    end
+  end
+end
+check('format 1: comments become threads, the comment fields are gone', #step1.threads == 5 and step1.comments == nil
+  and st.tours[1].next_thread == 6 and st.tours[1].next_comment == nil, vim.inspect(step1.threads))
+check('format 1: an unsent question is a draft question with its text as the first message', thread('t1') and thread('t1').kind == 'question'
+  and thread('t1').state == 'draft' and thread('t1').sent == 0 and thread('t1').from == 3 and thread('t1').to == 3
+  and vim.deep_equal(thread('t1').messages, { { by = 'user', text = 'why?' } }), vim.inspect(thread('t1')))
+check('format 1: an issue that was sent is a change request that waits', thread('t2').kind == 'change' and thread('t2').state == 'waiting'
+  and thread('t2').sent == 1 and thread('t2').from == 4 and thread('t2').to == 5 and #thread('t2').messages == 1, vim.inspect(thread('t2')))
+check('format 1: an answered suggestion is a change request with the answer as an agent message', thread('t3').kind == 'change'
+  and thread('t3').state == 'answered' and thread('t3').sent == 2
+  and vim.deep_equal(thread('t3').messages, { { by = 'user', text = 'use a loop' }, { by = 'agent', text = 'agreed\nwill do' } }),
+  vim.inspect(thread('t3')))
+check('format 1: a resolved comment is done', thread('t4').kind == 'question' and thread('t4').state == 'done'
+  and thread('t4').messages[2].text == 'because', vim.inspect(thread('t4')))
+check('format 1: stale stays', thread('t5').stale == true and thread('t5').state == 'answered')
+check('format 1: the map shows the migrated tour, and counts its threads', H.panel_text()
+  == 'A\n> ✓ a.txt\n    first\n    b.txt\n    second\n1 waiting · 1 not sent', H.panel_text())
+w.step(1)
+local written = table.concat(vim.fn.readfile(store.path(old_root)), '\n')
+check('format 1: the next save writes format 2 without the old fields', saved(old_root).version == 2 and not written:match('"panel"')
+  and not written:match('"check"'), written)
+w.close()
+check('format 1: and the new file resumes', w.resume() == 'ok' and #st.history == 2 and #st.history[1].threads == 5
+  and st.history[1].threads[1].messages[1].text == 'why?' and not written:match('"comments"') and not written:match('next_comment'))
+reset()
+-- A format 2 file written while threads were being built still has comments.
+local format2 = format1:gsub('"version":1', '"version":2'):gsub('\n "panel":[^\n]*', ''):gsub('"panel":%["# Two","text"%],', '')
+vim.fn.writefile({ format2 }, store.path(old_root))
+check('format 2 with comments: converted the same way', w.resume() == 'ok' and #st.history[1].threads == 5
+  and st.history[1].threads[3].state == 'answered' and st.history[1].comments == nil and st.tours[1].next_thread == 6,
+  vim.inspect(st.history))
+-- A comment that is not one fails validation: the step is dropped, as for any bad step.
+reset()
+vim.fn.writefile({ (format1:gsub('"type":"issue"', '"type":"issue","from":"x"'):gsub('"id":"c2"', '"id":"cx"')) }, store.path(old_root))
+local bad_res = w.resume()
+check('format 1: a malformed comment drops its step, like any bad step', bad_res == 'ok' and #st.history == 1
+  and st.history[1].title == 'second', tostring(bad_res) .. vim.inspect(st.history))
+reset()
+vim.fn.writefile({ (format1:gsub('"version":1', '"version":3')) }, store.path(old_root))
+check('an unknown newer format is still refused', w.resume():match('unknown format') ~= nil)
 reset()
 
 -- A corrupt state file -------------------------------------------------------------------------------------

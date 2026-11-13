@@ -1,5 +1,5 @@
--- P-10: the base version of the step's file in a float, and `path:line`
--- references in the panel.
+-- P-10: the base version of the step's file in a float, and going back to the
+-- current step.
 local H = require('helpers')
 local check, send, w = H.check, H.send, H.w
 local st = _G.walkthrough_state
@@ -96,92 +96,27 @@ check(':Walkthrough base works', #log == 2 and #floats() == 0, vim.inspect(log))
 w.close()
 reset_log()
 w.base()
-check('base: no tour', find('no tour open') ~= nil)
+check('base: no tour', find('no review open') ~= nil)
 
--- References in the panel ---------------------------------------------------------------------------
+-- Back to the current step -------------------------------------------------------------------------
 vim.fn.writefile(lines(6, 'x'), dir .. '/b.txt')
-open({
-  from = 9, title = 'one',
-  panel = {
-    '# One', '',
-    'It connects to `sub/x.lua:3` and `b.txt:2`.',
-    'Absolute: ' .. dir .. '/b.txt:4.',
-    'Not a file: nope/none.lua:1',
-    'Plain text without a reference',
-  },
-})
-local function panel_line(pattern)
-  for i, l in ipairs(vim.api.nvim_buf_get_lines(st.panel_buf, 0, -1, false)) do
-    if l:match(pattern) then
-      return i, l
-    end
-  end
-end
-local function press_enter(line, col)
-  vim.api.nvim_set_current_win(st.panel_win)
-  vim.api.nvim_win_set_cursor(st.panel_win, { line, col or 0 })
-  vim.api.nvim_feedkeys(vim.keycode('<CR>'), 'x', false)
-end
+open({ from = 9, title = 'one' })
 local function code()
   local win = st.code_win
   return vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(win)), vim.api.nvim_win_get_cursor(win)[1]
 end
--- The file is relative to the repository root.
-local i, l = panel_line('It connects')
-press_enter(i, (l:find('b.txt', 1, true)))
-local name, line = code()
-check('reference: path:line under the cursor opens that file there (relative to the root)', name == dir .. '/b.txt' and line == 2, name .. ':' .. line)
-check('reference: the cursor stays in the panel', vim.api.nvim_get_current_win() == st.panel_win)
--- Without the cursor on one, the first that exists.
-press_enter(i, 0)
-name, line = code()
-check('reference: else the first one on the line', name == dir .. '/sub/x.lua' and line == 3, name .. ':' .. line)
--- Back to the current step.
+vim.api.nvim_win_call(st.code_win, function()
+  vim.cmd('edit ' .. vim.fn.fnameescape(dir .. '/b.txt'))
+end)
+check('back: the code window shows another file', (code()) == dir .. '/b.txt')
 vim.cmd('Walkthrough back')
-name, line = code()
+local name, line = code()
 check('back: shows the current step again', name == x and line == 9 and vim.json.decode(w.status()).step == 1, name .. ':' .. line)
-check('back: Lua API w.step(0)', (function()
-  press_enter(i, 0)
-  w.step(0)
-  return (code()) == x
-end)())
--- Absolute path.
-press_enter((panel_line('^Absolute')))
-name, line = code()
-check('reference: absolute path', name == dir .. '/b.txt' and line == 4, name .. ':' .. line)
--- Relative to the working directory.
-vim.fn.writefile(lines(6, 'y'), dir .. '/sub/only_here.txt')
+vim.api.nvim_win_call(st.code_win, function()
+  vim.cmd('edit ' .. vim.fn.fnameescape(dir .. '/b.txt'))
+end)
 w.step(0)
-vim.api.nvim_set_current_win(st.panel_win)
-vim.api.nvim_buf_call(st.panel_buf, function() end)
-st.history[1].panel = 'See only_here.txt:5 now'
-require('walkthrough.ui').show_panel(st.history[1], 1, 1)
-vim.cmd('cd ' .. vim.fn.fnameescape(dir .. '/sub'))
-press_enter((panel_line('only_here')))
-name, line = code()
-check('reference: relative to the working directory', name == dir .. '/sub/only_here.txt' and line == 5, name .. ':' .. line)
-vim.cmd('cd ' .. vim.fn.fnameescape(dir))
--- A reference that does not exist, and a plain line, do nothing.
-w.step(0)
-local before = code()
-press_enter((panel_line('^# One')) or 1)
-check('reference: a line without one does nothing', (code()) == before)
-st.history[1].panel = { 'Not a file: nope/none.lua:1' }
-require('walkthrough.ui').show_panel(st.history[1], 1, 1)
-press_enter(1)
-check('reference: a missing file does nothing', (code()) == before and #log == 0, vim.inspect(log))
--- A line past the end is clamped.
-st.history[1].panel = { 'Far: b.txt:999' }
-require('walkthrough.ui').show_panel(st.history[1], 1, 1)
-press_enter(1)
-name, line = code()
-check('reference: a line past the end is clamped', name == dir .. '/b.txt' and line == 6, name .. ':' .. line)
--- Note headings still work.
-w.step(0)
-send('patch', { note = 1, line = 10, text = 'ten' })
-local nh = (panel_line('^### %[1%]'))
-press_enter(nh)
-check('reference: <CR> on a note heading still jumps to the note', vim.api.nvim_win_get_cursor(st.code_win)[1] == 10)
+check('back: Lua API w.step(0)', (code()) == x)
 
 w.close()
 vim.cmd('silent! %bwipeout!')

@@ -9,34 +9,44 @@ local M = {}
 -- { key, <Plug> name, modes, absolute }. A key is appended to the prefix
 -- (`<leader>w` unless setup() got a string), except when `absolute` is set.
 M.defaults = {
+  -- Start
+  { 'r', 'review' },
+  { 'M', 'request' },
+  { 'R', 'resume' },
+  { 'q', 'close' },
+  -- Move
   { ']w', 'next', { 'n' }, true },
   { '[w', 'prev', { 'n' }, true },
   { ']n', 'note-next', { 'n' }, true },
   { '[n', 'note-prev', { 'n' }, true },
-  { 'w', 'back' },
   { ']', 'group-next' },
   { '[', 'group-prev' },
-  { 'a', 'ask' },
-  { 'c', 'comment', { 'n', 'x' } },
-  { 'i', 'comment-issue', { 'n', 'x' } },
-  { 'u', 'comment-suggestion', { 'n', 'x' } },
-  { 'X', 'comment-delete' },
+  { 'v', 'view' },
+  { 'p', 'map' },
+  { 'w', 'back' },
+  -- Write
+  { 'a', 'ask', { 'n', 'x' } },
+  { 'c', 'change', { 'n', 'x' } },
   { 'm', 'send' },
-  { 'y', 'accept' },
-  { 'd', 'decline' },
-  { '0', 'undecide' },
+  { 't', 'thread' },
+  { 'X', 'thread-delete' },
   { '-', 'simpler' },
   { '+', 'deeper' },
   { '=', 'deeper' },
-  { 'r', 'check-reveal' },
-  { 'e', 'check-answer' },
+  -- Decide
+  { 'y', 'accept' },
+  { 'd', 'decline' },
+  { '0', 'undecide' },
+  -- Approve
   { 's', 'stage' },
   { 'S', 'stage-all' },
   { 'x', 'reject' },
   { 'b', 'base' },
-  { 'v', 'reviewed' },
-  { 'R', 'resume' },
-  { 'q', 'close' },
+  { 'C', 'commit' },
+  -- Plan
+  { 'A', 'plan-approve' },
+  { 'F', 'plan-feedback' },
+  -- Help
   { '?', 'keys' },
 }
 
@@ -50,7 +60,7 @@ function M.prefix(keys)
 end
 
 -- <Plug> name -> what it does, in words (filled from the cheat sheet below),
--- so which-key and :map show "Walkthrough: stage the group in this file"
+-- so which-key and :map show "Walkthrough: stage the commit in this file"
 -- rather than a mapping name.
 local text_of = {}
 
@@ -78,44 +88,49 @@ end
 
 -- The cheat sheet: { group, { { <Plug> name, text, :Walkthrough fallback } } }.
 local sheet = {
-  { 'Move', {
-    { 'next', 'next step', 'next' },
-    { 'prev', 'previous step', 'prev' },
-    { 'back', 'show the current step again', 'back' },
-    { 'note-next', 'next note', 'note-next' },
-    { 'note-prev', 'previous note', 'note-prev' },
-    { 'group-next', 'next tour', 'group next' },
-    { 'group-prev', 'previous tour', 'group prev' },
+  { 'Start', {
+    { 'review', 'review the uncommitted changes (the files, from git)', 'review' },
+    { 'request', 'ask the agent for the map of the change', 'request' },
+    { 'resume', 'bring back the saved review', 'resume' },
+    { 'close', 'end the session', 'close' },
   } },
-  { 'Ask and comment', {
-    { 'ask', 'ask the agent about this note or line', 'ask' },
-    { 'comment', 'comment: question', 'comment question' },
-    { 'comment-issue', 'comment: issue', 'comment issue' },
-    { 'comment-suggestion', 'comment: suggestion', 'comment suggestion' },
-    { 'comment-delete', 'delete the comment here', 'comment-delete' },
-    { 'send', 'send comments, decisions and answers', 'send' },
+  { 'Move', {
+    { 'next', 'next entry', 'next' },
+    { 'prev', 'previous entry', 'prev' },
+    { 'note-next', 'next thread or finding', 'note-next' },
+    { 'note-prev', 'previous thread or finding', 'note-prev' },
+    { 'group-next', 'next commit', 'group next' },
+    { 'group-prev', 'previous commit', 'group prev' },
+    { 'view', 'switch between the compact view and the file view', 'view' },
+    { 'map', 'show or hide the map panel', 'map' },
+    { 'back', 'back to the current entry', 'back' },
+  } },
+  { 'Write', {
+    { 'ask', 'ask a question here (sent at once)', 'ask' },
+    { 'change', 'write a change request here (collected)', 'change' },
+    { 'send', 'send the change requests and decisions', 'send' },
+    { 'thread', 'open the thread or finding here in full', 'thread' },
+    { 'thread-delete', 'delete the thread here', 'thread-delete' },
+    { 'simpler', 'ask for a simpler answer here', 'explain simpler' },
+    { 'deeper', 'ask for a deeper answer here', 'explain deeper' },
   } },
   { 'Decide', {
-    { 'accept', "accept the note's verdict", 'decide accept' },
-    { 'decline', "decline the note's verdict", 'decide reject' },
-    { 'undecide', 'clear the decision', 'decide clear' },
-  } },
-  { 'Understand', {
-    { 'simpler', 'explain simpler', 'explain simpler' },
-    { 'deeper', 'explain deeper', 'explain deeper' },
-    { 'check-reveal', "reveal the check's answer", 'check reveal' },
-    { 'check-answer', 'answer the check', 'check answer' },
+    { 'accept', 'accept the proposal or finding here (sent at once)', 'decide accept' },
+    { 'decline', 'decline the proposal or finding here (sent at once)', 'decide reject' },
+    { 'undecide', 'clear a decision that is not sent yet', 'decide clear' },
   } },
   { 'Approve', {
-    { 'stage', 'stage the group in this file', 'stage' },
-    { 'stage-all', 'stage the group in every file', 'stage all' },
-    { 'reject', "discard the group's unstaged lines", 'reject' },
-    { 'base', 'base view', 'base' },
+    { 'stage', "stage the commit's lines in this file", 'stage' },
+    { 'stage-all', "stage the commit's lines in every file", 'stage all' },
+    { 'reject', "discard the commit's unstaged lines", 'reject' },
+    { 'base', 'show the base version of the file', 'base' },
+    { 'commit', 'check, message and commit what is staged', 'commit' },
   } },
-  { 'Review state', {
-    { 'reviewed', 'record a reviewed snapshot', 'reviewed' },
-    { 'resume', 'bring back the saved review', 'resume' },
-    { 'close', 'close the tour', 'close' },
+  { 'Plan', {
+    { 'plan-approve', 'approve the plan (A in the plan)', 'plan approve' },
+    { 'plan-feedback', 'send the plan feedback (F in the plan)', 'plan feedback' },
+  } },
+  { 'Help', {
     { 'keys', 'this cheat sheet', 'keys' },
   } },
 }
@@ -159,7 +174,7 @@ local function sheet_lines()
   titles[#rows + 1] = true
   row('In the panel', '')
   for _, k in ipairs(ui.panel_keys) do
-    row(table.concat(k.keys, ' '), k.desc:sub(1, 1):lower() .. k.desc:sub(2) .. (k.check and ' (steps with a check)' or ''))
+    row(table.concat(k.keys, ' '), k.desc:sub(1, 1):lower() .. k.desc:sub(2))
   end
   local width = 0
   for i, r in ipairs(rows) do

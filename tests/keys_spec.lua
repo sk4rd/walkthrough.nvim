@@ -36,17 +36,21 @@ local function stub(module, name, label)
 end
 local snapshot_orig = w.snapshot
 stub(w, 'step', 'step')
+stub(w, 'view', 'view')
 stub(w, 'note', 'note')
 stub(w, 'group', 'group')
-stub(w, 'ask_line', 'ask')
-stub(w, 'comment', 'comment')
-stub(w, 'comment_delete', 'comment_delete')
+stub(w, 'ask', 'ask')
+stub(w, 'change', 'change')
+stub(w, 'thread', 'thread')
+stub(w, 'thread_delete', 'thread_delete')
 stub(w, 'send', 'send')
 stub(w, 'decide', 'decide')
 stub(w, 'explain', 'explain')
-stub(w, 'check', 'check')
+stub(w, 'review', 'review')
+stub(w, 'request', 'request')
 stub(w, 'stage_group', 'stage')
 stub(w, 'reject_group', 'reject')
+stub(w, 'commit', 'commit')
 stub(w, 'base', 'base')
 stub(w, 'resume', 'resume')
 stub(w, 'close', 'close')
@@ -57,17 +61,15 @@ w.snapshot = function(name)
 end
 
 local plugs = {
-  { 'next', 'step{ 1 }' }, { 'prev', 'step{ -1 }' }, { 'back', 'step{ 0 }' },
+  { 'next', 'step{ 1 }' }, { 'prev', 'step{ -1 }' }, { 'back', 'step{ 0 }' }, { 'view', 'view{}' },
   { 'note-next', 'note{ 1 }' }, { 'note-prev', 'note{ -1 }' },
   { 'group-next', 'group{ "next" }' }, { 'group-prev', 'group{ "prev" }' },
-  { 'ask', 'ask{}' },
-  { 'comment', 'comment{ "question" }', true }, { 'comment-issue', 'comment{ "issue" }', true },
-  { 'comment-suggestion', 'comment{ "suggestion" }', true },
-  { 'comment-delete', 'comment_delete{}' }, { 'send', 'send{}' },
+  { 'ask', 'ask{}', true }, { 'change', 'change{}', true },
+  { 'thread', 'thread{}' }, { 'thread-delete', 'thread_delete{}' }, { 'send', 'send{}' },
   { 'accept', 'decide{ "accept" }' }, { 'decline', 'decide{ "reject" }' }, { 'undecide', 'decide{ "clear" }' },
   { 'simpler', 'explain{ "simpler" }' }, { 'deeper', 'explain{ "deeper" }' },
-  { 'check-reveal', 'check{ "reveal" }' }, { 'check-answer', 'check{ "answer" }' },
-  { 'stage', 'stage{}' }, { 'stage-all', 'stage{ {  all = true } }' }, { 'reject', 'reject{}' },
+  { 'review', 'review{}' }, { 'request', 'request{}' },
+  { 'stage', 'stage{}' }, { 'stage-all', 'stage{ {  all = true } }' }, { 'reject', 'reject{}' }, { 'commit', 'commit{}' },
   { 'base', 'base{}' }, { 'reviewed', 'snapshot{ <1>nil }' },
   { 'resume', 'resume{}' }, { 'close', 'close{}' }, { 'keys', 'keys{}' },
 }
@@ -87,11 +89,11 @@ for _, p in ipairs(plugs) do
     press('V' .. plug(name))
     -- The stub does not leave visual mode, as the real action does.
     press('<Esc>')
-    check('<Plug>(walkthrough-' .. name .. ') works on a selection', #calls == 1 and calls[1]:match('^comment'), vim.inspect(calls))
+    check('<Plug>(walkthrough-' .. name .. ') works on a selection', #calls == 1 and calls[1]:match('^' .. name), vim.inspect(calls))
   end
 end
-for _, name in ipairs({ 'step', 'note', 'group', 'ask_line', 'comment', 'comment_delete', 'send', 'decide', 'explain',
-  'check', 'stage_group', 'reject_group', 'base', 'resume', 'close', 'keys', 'snapshot' }) do
+for _, name in ipairs({ 'step', 'view', 'note', 'group', 'ask', 'ask_line', 'change', 'thread', 'thread_delete', 'send', 'decide', 'explain',
+  'review', 'request', 'stage_group', 'reject_group', 'commit', 'base', 'resume', 'close', 'keys', 'snapshot' }) do
   w[name] = nil
 end
 package.loaded.walkthrough = nil
@@ -117,7 +119,7 @@ check('setup() without options maps nothing either', pcall(w.setup) and count_gl
 
 -- Cheat sheet without keys: commands ---------------------------------------------------------
 send('load', { group = 'A', steps = {
-  { file = f, title = 'one', panel = { '# One', 'text' }, check = { question = 'q?', answer = 'a' },
+  { file = f, title = 'one',
     notes = { { line = 2, text = 'a', verdict = 'simplify' }, { line = 8, text = 'b', verdict = 'simplify', detail = { 'more', 'detail' } } } },
   { file = H.work .. '/g.txt', title = 'two' },
 } })
@@ -133,7 +135,7 @@ check('cheat sheet: a centered float', vim.api.nvim_win_get_config(float).relati
 check('cheat sheet: a scratch buffer that cannot be changed', vim.bo.modifiable == false and vim.bo.buftype == 'nofile')
 check('cheat sheet: without keys it lists the commands', text:match(':Walkthrough next') and text:match(':Walkthrough stage all')
   and text:match(':Walkthrough decide accept') and text:match(':Walkthrough keys'), text)
-for _, group in ipairs({ 'Move', 'Ask and comment', 'Decide', 'Understand', 'Approve', 'Review state', 'In the panel' }) do
+for _, group in ipairs({ 'Start', 'Move', 'Write', 'Decide', 'Approve', 'Plan', 'Help', 'In the panel' }) do
   check('cheat sheet: group ' .. group, text:match('\n?' .. group .. '\n') ~= nil, text)
 end
 press('q')
@@ -144,13 +146,14 @@ check(':Walkthrough keys opens it', text:match('Move') ~= nil)
 press('<Esc>')
 check('cheat sheet: <Esc> closes it', not vim.api.nvim_win_is_valid(float))
 
--- Every action of the sheet is a <Plug> mapping, and the other way round -----------------------
+-- Every action of the sheet is a <Plug> mapping, and the other way round. The
+-- snapshot action (`reviewed`) is mapped but not on the sheet: it is no part of the workflow.
 do
   local mapped = {}
   for _, mode in ipairs({ 'n' }) do
     for _, m in ipairs(vim.api.nvim_get_keymap(mode)) do
       local name = m.lhs:match('^<Plug>%(walkthrough%-([%w-]+)%)$')
-      if name then
+      if name and name ~= 'reviewed' then
         mapped[name] = true
       end
     end
@@ -189,9 +192,35 @@ local function all_mapped(prefix)
 end
 local bad = all_mapped('<leader>w')
 check('keys = true: every default key is mapped to its action, with a desc', #bad == 0, table.concat(bad, ', '))
-check('keys = true: the table has the keys of the spec', #keys.defaults == 29)
-check('keys = true: visual-mode comment mappings', vim.fn.maparg('<leader>wc', 'x') ~= '' and vim.fn.maparg('<leader>wi', 'x') ~= ''
-  and vim.fn.maparg('<leader>wu', 'x') ~= '')
+check('keys = true: the table has the keys of the spec', #keys.defaults == 32)
+-- The final key set, group by group, exactly as the product defines it ("P" is the prefix).
+do
+  local spec = {
+    Pr = 'review', PM = 'request', PR = 'resume', Pq = 'close',
+    [']w'] = 'next', ['[w'] = 'prev', [']n'] = 'note-next', ['[n'] = 'note-prev', ['P]'] = 'group-next',
+    ['P['] = 'group-prev', Pv = 'view', Pp = 'map', Pw = 'back',
+    Pa = 'ask', Pc = 'change', Pm = 'send', Pt = 'thread', PX = 'thread-delete', ['P-'] = 'simpler',
+    ['P+'] = 'deeper', ['P='] = 'deeper',
+    Py = 'accept', Pd = 'decline', P0 = 'undecide',
+    Ps = 'stage', PS = 'stage-all', Px = 'reject', Pb = 'base', PC = 'commit',
+    PA = 'plan-approve', PF = 'plan-feedback',
+    ['P?'] = 'keys',
+  }
+  local got = {}
+  for _, k in ipairs(keys.defaults) do
+    got[k[4] and k[1] or ('P' .. k[1])] = k[2]
+  end
+  check('the default keys are exactly the final set', vim.deep_equal(got, spec), vim.inspect(got))
+end
+check('keys = true: r starts a review, v switches the view, e is gone', vim.fn.maparg('<leader>wr', 'n', false, true).rhs == plug('review')
+  and vim.fn.maparg('<leader>we', 'n') == '' and vim.fn.maparg('<leader>wv', 'n', false, true).rhs == plug('view')
+  and vim.fn.maparg('<leader>wR', 'n', false, true).rhs == plug('resume'))
+check('keys = true: the snapshot action stays, without a key', vim.fn.maparg(plug('reviewed'), 'n') ~= '')
+check('keys = true: visual-mode ask and change mappings', vim.fn.maparg('<leader>wa', 'x') ~= '' and vim.fn.maparg('<leader>wc', 'x') ~= '')
+check('keys = true: a ask, c change, t thread, X thread-delete; i and u are gone', vim.fn.maparg('<leader>wa', 'n', false, true).rhs == plug('ask')
+  and vim.fn.maparg('<leader>wc', 'n', false, true).rhs == plug('change') and vim.fn.maparg('<leader>wt', 'n', false, true).rhs == plug('thread')
+  and vim.fn.maparg('<leader>wX', 'n', false, true).rhs == plug('thread-delete') and vim.fn.maparg('<leader>wi', 'n') == ''
+  and vim.fn.maparg('<leader>wu', 'n') == '')
 check('keys = true: P+ and P= both deepen', vim.fn.maparg('<leader>w+', 'n', false, true).rhs == plug('deeper')
   and vim.fn.maparg('<leader>w=', 'n', false, true).rhs == plug('deeper'))
 check('keys = true: the old keys are not mapped', vim.fn.maparg('<leader>an', 'n') == '' and vim.fn.maparg('<leader>ac', 'n') == ''
@@ -208,11 +237,22 @@ check('setup twice: all keys still mapped', #all_mapped('<leader>w') == 0)
 vim.api.nvim_set_current_win(code)
 vim.cmd('Walkthrough keys')
 text, float = sheet()
-check('cheat sheet: shows the mapped keys', text:match(']w%s+next step') and text:match('<leader>wa%s+ask')
-  and text:match('<leader>wS%s+stage the group in every file'), text)
+check('cheat sheet: shows the mapped keys', text:match(']w%s+next entry') and text:match('<leader>wa%s+ask')
+  and text:match('<leader>wS%s+stage the commit\'s lines in every file'), text)
 check('cheat sheet: both keys of one action', text:match('<leader>w%+ <leader>w=') ~= nil, text)
+check('cheat sheet: the Write group', text:match('Write\n%s+<leader>wa%s+ask a question here %(sent at once%)\n%s+<leader>wc%s+write a change request here %(collected%)\n%s+<leader>wm%s+send the change requests and decisions\n%s+<leader>wt%s+open the thread or finding here in full\n%s+<leader>wX%s+delete the thread here') ~= nil, text)
 check('cheat sheet: no command for a mapped action', not text:match(':Walkthrough next'), text)
-check('cheat sheet: the panel keys', text:match('s%s+stage the group') and text:match('y%s+accept') and text:match('u%s+clear the decision'), text)
+check('cheat sheet: Start has review, request, resume and close, in that order', text:match('Start\n%s+<leader>wr%s+review the uncommitted changes[^\n]*\n%s+<leader>wM%s+ask the agent for the map of the change\n%s+<leader>wR%s+bring back the saved review\n%s+<leader>wq%s+end the session\n\nMove') ~= nil, text)
+check('cheat sheet: the snapshot action is not on it', not text:match('snapshot') and not text:match('reviewed'), text)
+check('cheat sheet: the Plan group names the plan keys', text:match('Plan\n%s+<leader>wA%s+approve the plan[^\n]*\n%s+<leader>wF%s+send the plan feedback') ~= nil, text)
+local panel_part = text:match('In the panel\n(.*)$') or ''
+check('cheat sheet: the panel keys', panel_part:match('<CR>%s+open the entry under the cursor') and panel_part:match('\n%s+s%s+stage the commit')
+  and panel_part:match('\n%s+%?%s+show all keys'), panel_part)
+check('cheat sheet: the panel keys of the notes are gone', not panel_part:match('accept') and not panel_part:match('simpler')
+  and not panel_part:match('check'), panel_part)
+-- The commit action runs the project's check; the check questions of tours are gone.
+check('cheat sheet: nothing about check questions', not text:match('question%s+check') and not text:match('check%s+question'), text)
+check('cheat sheet: the commit action is listed under Approve', text:match('Approve\n.-commit what is staged.-\n\nPlan') ~= nil, text)
 press('q')
 
 -- An own mapping is kept; a custom prefix --------------------------------------------------------------------
@@ -262,18 +302,19 @@ local function panel_map(lhs)
     return vim.fn.maparg(lhs, 'n', false, true)
   end)
 end
-for _, lhs in ipairs({ '<CR>', 'a', '-', '+', '=', 'r', 'e', 's', 'S', 'y', 'd', 'u', 'm', 'b', 'x', '?' }) do
+for _, lhs in ipairs({ '<CR>', 's', 'S', 'm', 'b', 'x', '?' }) do
   local m = panel_map(lhs)
   check('panel key ' .. lhs .. ' exists, local to the buffer, with a desc', m.buffer == 1 and (m.desc or ''):match('^Walkthrough: '), vim.inspect(m))
+end
+for _, lhs in ipairs({ 'a', '-', '+', '=', 'r', 'e', 'y', 'd', 'u' }) do
+  check('panel key ' .. lhs .. ' was removed with the notes', panel_map(lhs).buffer ~= 1)
 end
 for _, lhs in ipairs({ 'n', 'q', 'j', 'k', '/', 'N', 'h', 'l' }) do
   check('panel key ' .. lhs .. ' is left alone', panel_map(lhs).buffer ~= 1)
 end
 w.step(1)
-check('panel: no check keys on a step without a check', panel_map('r').buffer ~= 1 and panel_map('e').buffer ~= 1)
-check('panel: the other keys stay', panel_map('s').buffer == 1 and panel_map('?').buffer == 1)
+check('panel: the keys are the same on every step', panel_map('s').buffer == 1 and panel_map('?').buffer == 1 and panel_map('r').buffer ~= 1)
 w.step(-1)
-check('panel: check keys are back on a step with a check', panel_map('r').buffer == 1 and panel_map('e').buffer == 1)
 
 local function in_panel(pattern)
   vim.api.nvim_set_current_win(st.panel_win)
@@ -284,22 +325,6 @@ local function in_panel(pattern)
     end
   end
 end
-local notes = st.tours[st.active].steps[1].notes
-check('panel: found the second note\'s text', in_panel('^detail'))
-press('y')
-check('panel: y accepts the note whose section the cursor is in', notes[2].decision == 'accept' and notes[1].decision == nil)
-press('d')
-check('panel: d declines it', notes[2].decision == 'reject')
-press('u')
-check('panel: u clears it', notes[2].decision == nil)
-in_panel('^### %[1%]')
-press('y')
-check('panel: y on a heading accepts that note', notes[1].decision == 'accept' and notes[2].decision == nil)
-press('u')
-in_panel('^text')
-reset_log()
-press('y')
-check('panel: y outside a note changes nothing', notes[1].decision == nil and notes[2].decision == nil and find('no note here') ~= nil, vim.inspect(log))
 
 -- s, S, m, b, x and ? call their actions (the actions are tested elsewhere).
 do
@@ -313,7 +338,7 @@ do
   reject_mod.reject_group = function() table.insert(calls, 'reject') end
   base_mod.show = function() table.insert(calls, 'base') end
   keys_mod.show = function() table.insert(calls, 'keys') end
-  in_panel('^text')
+  in_panel('^A$')
   for _, k in ipairs({ 's', 'S', 'm', 'x', 'b', '?' }) do
     press(k)
   end
@@ -321,7 +346,7 @@ do
     table.concat(calls, ',') == 'stage,stage all,send,reject,base,keys', table.concat(calls, ','))
   stage_mod.stage_group, feedback_mod.send, reject_mod.reject_group, base_mod.show, keys_mod.show = unpack(orig)
 end
-in_panel('^text')
+in_panel('^A$')
 press('?')
 text, float = sheet()
 check('panel: ? opens the cheat sheet', text:match('In the panel') ~= nil and vim.api.nvim_win_get_config(float).relative == 'editor')
@@ -332,7 +357,7 @@ check('panel: q closed the cheat sheet and left the panel alone', not vim.api.nv
 w.step(0)
 local bar = H.panel_winbar()
 check('hints: the bar ends with the cheat sheet key', bar:match('%? all keys$') ~= nil, bar)
-check('hints: panel keys first', bar:match('<CR> jump to note · a ask · %- simpler · %+ deeper · r reveal · e answer · %? all keys$') ~= nil, bar)
+check('hints: panel keys first', bar:match('<CR> open · s stage · S stage all · %? all keys$') ~= nil, bar)
 local hint = bar:match('%%#Comment#  (.*)$')
 local named = {}
 for part in (hint or ''):gmatch('[^·]+') do
@@ -344,11 +369,11 @@ for _, lhs in ipairs(named) do
     table.insert(missing, lhs)
   end
 end
-check('hints: every key they name exists in the panel', #named >= 6 and #missing == 0, table.concat(missing, ', '))
+check('hints: every key they name exists in the panel', #named >= 4 and #missing == 0, table.concat(missing, ', '))
 check('hints: no global key is named', not bar:match('leader') and not bar:match('%]w') and not bar:match('%[n'), bar)
 w.step(1)
 bar = H.panel_winbar()
-check('hints: no check keys without a check, still ends with the cheat sheet key', not bar:match('r reveal') and bar:match('%? all keys$'), bar)
+check('hints: the same on every step, still ending with the cheat sheet key', bar:match('<CR> open') and bar:match('%? all keys$'), bar)
 w.step(-1)
 -- The footer repeats the hints when the bar does not fit; it ends the same way.
 vim.o.columns = 200

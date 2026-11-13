@@ -1,5 +1,5 @@
--- U-5: staged/seen progress in the winbar, and group-wide staging over
--- several files (one of them untracked). Needs gitsigns.nvim.
+-- U-5: staged/seen progress in the winbar and the map, and group-wide
+-- staging over several files (one of them untracked). Needs gitsigns.nvim.
 local H = require('helpers')
 local check, send, w = H.check, H.send, H.w
 local st = _G.walkthrough_state
@@ -77,18 +77,28 @@ end
 -- Progress numbers -----------------------------------------------------------------
 local repo = fixture()
 open(repo)
-check('winbar: seen, staged and the rest in order', bar_has('Step 1/3  · A · seen 1/3 · staged 0/6 · a'), bar())
+check('winbar: group, staged and seen in order', bar_has('^ A  · staged 0/6 · seen 1/3'), bar())
 w.step(1)
-check('winbar: seen follows the steps', bar_has('seen 2/3 · staged 0/6 · b'), bar())
+check('winbar: seen follows the steps', bar_has('^ A  · staged 0/6 · seen 2/3'), bar())
 w.step(-1)
 
 -- Single-file staging changes the count.
 vim.api.nvim_win_set_cursor(0, { 5, 0 })
 H.attach()
 w.stage_group()
-H.wait_notify(find, 'staged group')
+H.wait_notify(find, 'staged commit')
 check('winbar: staged follows the first file', bar_has('staged 2/6'), bar())
 check('staged is what git has', cached(repo, 'a.txt'):match('%+A2\n%+A3') ~= nil and not cached(repo, 'a.txt'):match('B5'))
+
+-- The counts per file are the parts of the total.
+local counted = require('walkthrough.progress').compute(st.tours[st.active])
+check('compute: per-file counts next to the totals', counted and counted.staged == 2 and counted.total == 6
+  and vim.deep_equal(counted.files[repo .. '/a.txt'], { staged = 2, total = 2 })
+  and vim.deep_equal(counted.files[repo .. '/b.txt'], { staged = 0, total = 1 })
+  and vim.deep_equal(counted.files[repo .. '/c.txt'], { staged = 0, total = 3 }), vim.inspect(counted))
+check('the map shows them per entry', H.wait(function()
+  return H.panel_text():match('a%.txt%s+2/2') ~= nil and H.panel_text():match('b%.txt%s+0/1') ~= nil and H.panel_text():match('c%.txt%s+0/3') ~= nil
+end), H.panel_text())
 
 -- No ranges, no number --------------------------------------------------------------------
 check('no hunks: no staged part', (function()
@@ -122,16 +132,16 @@ vim.fn.confirm = function(msg, choices, default)
   return answer
 end
 w.stage_group({ all = true })
-check('gate: unseen steps ask once, default is cancel', #asked == 1 and asked[1].default == 2 and asked[1].msg:match('2 of 3 steps'), vim.inspect(asked))
+check('gate: unseen steps ask once, default is cancel', #asked == 1 and asked[1].default == 2 and asked[1].msg:match('2 of 3 entries'), vim.inspect(asked))
 check('gate: cancelling stages nothing', find('not staged') ~= nil and H.git_in(repo, 'diff', '--cached', '--stat') == '')
 
 answer = 1
 reset_log()
 asked = {}
 w.stage_group({ all = true })
-local n = H.wait_notify(find, 'staged group') or H.wait_notify(find, 'skipped')
+local n = H.wait_notify(find, 'staged commit') or H.wait_notify(find, 'skipped')
 check('stage all: asks once', #asked == 1, vim.inspect(asked))
-check('stage all: the message reports lines and files from git', n ~= nil and n.msg == 'walkthrough: staged group "A": 6 lines in 3 files'
+check('stage all: the message reports lines and files from git', n ~= nil and n.msg == 'walkthrough: staged commit "A": 6 lines in 3 files'
   and n.level == vim.log.levels.INFO, vim.inspect(log))
 check('stage all: a.txt, only group A', cached(repo, 'a.txt'):match('%+A2\n%+A3') ~= nil and not cached(repo, 'a.txt'):match('B5'))
 check('stage all: b.txt', cached(repo, 'b.txt'):match('%+A4') ~= nil, cached(repo, 'b.txt'))
@@ -154,7 +164,7 @@ w.step(1)
 w.step(1)
 asked = {}
 w.stage_group({ all = true })
-n = H.wait_notify(find, 'staged group')
+n = H.wait_notify(find, 'staged commit')
 check('seen everything: no question', #asked == 0 and n ~= nil and n.msg:match('6 lines in 3 files'), vim.inspect(log) .. vim.inspect(asked))
 
 -- A stale range in one file is skipped and named ----------------------------------------------------
@@ -171,7 +181,7 @@ w.stage_group({ all = true })
 n = H.wait_notify(find, 'skipped')
 check('stale: b.txt is skipped and named', n ~= nil and n.msg:match('skipped .*b%.txt %(lines %d+%-%d+ were edited') ~= nil
   and n.level == vim.log.levels.WARN, vim.inspect(log))
-check('stale: the other files were staged', n ~= nil and n.msg:match('staged group "A": 5 lines in 2 files') ~= nil, vim.inspect(log))
+check('stale: the other files were staged', n ~= nil and n.msg:match('staged commit "A": 5 lines in 2 files') ~= nil, vim.inspect(log))
 check('stale: nothing of b.txt is staged', cached(repo, 'b.txt') == '')
 check('stale: a.txt and c.txt are', cached(repo, 'a.txt'):match('%+A2') ~= nil and H.git_in(repo, 'diff', '--cached', '--numstat', '--', 'c.txt'):match('^3') ~= nil)
 check('stale: single-file staging refuses it too', (function()
@@ -198,7 +208,7 @@ reset_log()
 w.stage_group({ all = true })
 n = H.wait_notify(find, 'left unstaged')
 gs.stage_hunk = real
-check('partial: lines left are counted from git', n ~= nil and n.msg:match('staged group "A": 5 lines in 2 files; 1 line left unstaged %(.*b%.txt: 4%)') ~= nil
+check('partial: lines left are counted from git', n ~= nil and n.msg:match('staged commit "A": 5 lines in 2 files; 1 line left unstaged %(.*b%.txt: 4%)') ~= nil
   and n.level == vim.log.levels.WARN, vim.inspect(log))
 check('partial: git indeed has nothing of b.txt', cached(repo, 'b.txt') == '')
 

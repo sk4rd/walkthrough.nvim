@@ -7,9 +7,11 @@ local M = {}
 --- Count the lines of the reviewed group's ranges in every file of `t`:
 --- `total` differ from HEAD, `staged` of those no longer differ from the
 --- index. A shown deletion counts as one line, on the line it is shown on.
---- Two `git diff` calls per file. Returns { staged, total }, or nil when
---- there is nothing to count: no step lists ranges for a diff against HEAD,
---- or the files are not in a repository.
+--- Two `git diff` calls per file. Returns { staged, total, files }, where
+--- `files` maps the absolute path of each counted file to its own
+--- { staged, total } (the map panel shows them per entry), or nil when there
+--- is nothing to count: no step lists ranges for a diff against HEAD, or the
+--- files are not in a repository.
 function M.compute(t)
   local order, files = {}, {}
   for _, step in ipairs(t.steps) do
@@ -30,6 +32,7 @@ function M.compute(t)
   end
 
   local staged, total, counted = 0, 0, false
+  local per_file = {}
   for _, abs in ipairs(order) do
     local head = git.hunks(abs, 'HEAD')
     local index = head and git.hunks(abs, nil)
@@ -38,20 +41,23 @@ function M.compute(t)
       local last = #vim.fn.readfile(abs)
       local changed = git.unstaged_set(head, last)
       local unstaged = git.unstaged_set(index, last)
+      local file_staged, file_total = 0, 0
       for line in pairs(files[abs]) do
         if changed[line] then
-          total = total + 1
+          file_total = file_total + 1
           if not unstaged[line] then
-            staged = staged + 1
+            file_staged = file_staged + 1
           end
         end
       end
+      per_file[abs] = { staged = file_staged, total = file_total }
+      staged, total = staged + file_staged, total + file_total
     end
   end
   if not counted then
     return nil
   end
-  return { staged = staged, total = total }
+  return { staged = staged, total = total, files = per_file }
 end
 
 return M

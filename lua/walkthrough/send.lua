@@ -1,41 +1,12 @@
--- Asking the agent about a note or a line. The request is built here as a
--- message and handed to a sender (config.sender), so any agent that lives in
--- a Neovim terminal, or in the clipboard, can receive it:
---   msg = { text = <markdown>, refs = { { file, from, to }, ... }, prefill = <string|nil> }
+-- Handing a message to the agent. The request is built in feedback.lua and
+-- passed to a sender (config.sender), so any agent that lives in a Neovim
+-- terminal, or in the clipboard, can receive it:
+--   msg = { text = <markdown>, refs = { { file, from, to }, ... }, prefill = <string|nil>,
+--           submit = <boolean, config.submit unless set> }
 local st = require('walkthrough.state')
-local ui = require('walkthrough.ui')
 local tour = require('walkthrough.tour')
 
 local M = {}
-
--- What the user is looking at, as text for the agent: the step, and the note
--- (with verdict and detail) when `n` is given, else the step's panel text.
-local function ask_context(step, n, from, to)
-  local file = vim.fn.fnamemodify(step.file, ':~:.')
-  local lines = {
-    ('Walkthrough step %d/%d: "%s"'):format(st.pos, #st.history, step.title or file),
-  }
-  local note = n and tour.find_note(step, n)
-  if note then
-    local head = ('Note [%d] on %s line %d'):format(n, file, from)
-    if note.verdict then
-      head = head .. ' · verdict: ' .. note.verdict
-    end
-    table.insert(lines, head)
-    table.insert(lines, 'Inline: ' .. table.concat(tour.to_lines(note.text or ''), '\n'))
-    if note.detail then
-      table.insert(lines, 'Detail:')
-      vim.list_extend(lines, tour.to_lines(note.detail))
-    end
-  else
-    table.insert(lines, from and ('Focus: %s lines %d-%d'):format(file, from, to) or ('File: ' .. file))
-    if step.panel then
-      vim.list_extend(lines, { '', 'Panel:' })
-      vim.list_extend(lines, tour.to_lines(step.panel))
-    end
-  end
-  return lines
-end
 
 -- Senders ---------------------------------------------------------------------
 
@@ -63,10 +34,12 @@ end
 local senders = {}
 
 -- claudecode.nvim: the context as a temp file plus an @file#L reference to
--- the code, then the agent terminal gets focus so the user can type a
--- question. The context file is what makes "simplify this" unambiguous, even
--- after the code moved or in another session. The prefill is typed into the
--- prompt but not sent, so the user can edit it and press Enter.
+-- the code. The context file is what makes "simplify this" unambiguous, even
+-- after the code moved or in another session. With `submit` one line that
+-- points at the context file is typed into the agent's prompt and submitted,
+-- and the focus stays where it is; without it the agent terminal gets focus
+-- and the line (the prefill, if the message has one) is typed but not sent,
+-- so the user can edit it and press Enter.
 function senders.claudecode(msg)
   if vim.fn.exists(':ClaudeCodeAdd') ~= 2 then
     error('sender "claudecode" needs claudecode.nvim (the :ClaudeCodeAdd command is missing)', 0)
@@ -80,20 +53,22 @@ function senders.claudecode(msg)
     local file = vim.fn.fnameescape(vim.fn.fnamemodify(ref.file, ':p'))
     vim.cmd(ref.from and ('ClaudeCodeAdd %s %d %d'):format(file, ref.from, ref.to or ref.from) or ('ClaudeCodeAdd ' .. file))
   end
-  vim.cmd('ClaudeCodeFocus')
 
-  if msg.prefill then
-    -- The @-references travel over claudecode's websocket, the typed text
-    -- over the terminal; a short delay keeps the text after the references.
-    vim.defer_fn(function()
-      local ok, err = pcall(function()
-        require('claudecode.terminal').send_to_terminal(msg.prefill, { submit = false })
-      end)
-      if not ok then
-        vim.notify('walkthrough: ' .. tour.clean_error(err), vim.log.levels.WARN)
-      end
-    end, 200)
+  local line = (not msg.submit and msg.prefill)
+    or ('Walkthrough: act on the feedback in %s (also added as context), as its "Expected" lines say.'):format(ctx)
+  if not msg.submit then
+    vim.cmd('ClaudeCodeFocus')
   end
+  -- The @-references travel over claudecode's websocket, the typed text over
+  -- the terminal; a short delay keeps the text after the references.
+  vim.defer_fn(function()
+    local ok, err = pcall(function()
+      require('claudecode.terminal').send_to_terminal(line, { submit = msg.submit == true })
+    end)
+    if not ok then
+      vim.notify('walkthrough: ' .. tour.clean_error(err), vim.log.levels.WARN)
+    end
+  end, 200)
 end
 
 -- Whether a terminal buffer looks like an agent.
@@ -137,15 +112,19 @@ function M.find_terminal()
 end
 
 -- A terminal running an agent: the text is pasted as a bracketed paste, so
--- the agent takes it as one block and nothing is submitted (no trailing
--- newline, no Enter).
+-- the agent takes it as one block. With `submit` a carriage return follows
+-- and the cursor stays where it is; without it nothing is submitted (no
+-- trailing newline, no Enter) and the cursor moves to the terminal.
 function senders.terminal(msg)
   local buf, win = M.find_terminal()
   if not buf then
     error('no agent terminal found (see terminal_pattern in the setup options)', 0)
   end
-  vim.api.nvim_chan_send(vim.bo[buf].channel, '\27[200~' .. flatten(msg) .. '\27[201~')
-  if win then
+  local chan = vim.bo[buf].channel
+  vim.api.nvim_chan_send(chan, '\27[200~' .. flatten(msg) .. '\27[201~')
+  if msg.submit then
+    vim.api.nvim_chan_send(chan, '\r')
+  elseif win then
     vim.api.nvim_set_current_win(win)
     vim.cmd.startinsert()
   end
@@ -171,6 +150,9 @@ end
 
 --- Hand `msg` to the configured sender. Raises with a short message.
 function M.send(msg)
+  if msg.submit == nil then
+    msg.submit = st.config.submit ~= false
+  end
   local sender = st.config.sender
   if type(sender) == 'function' then
     return sender(msg)
@@ -182,60 +164,6 @@ function M.send(msg)
     error(('unknown sender "%s"'):format(tostring(sender)), 0)
   end
   return senders[sender](msg)
-end
-
--- Asking ----------------------------------------------------------------------
-
--- `a` in the panel: the note under the cursor, or else the step.
-function M.ask_panel()
-  local step = st.history[st.pos]
-  if not step then
-    return
-  end
-  local n, line = ui.note_under_cursor()
-  local from, to = line, line
-  if not line then
-    n = nil
-    from, to = ui.focus_range(step, ui.code_buf())
-  end
-  M.send({
-    text = table.concat(ask_context(step, n, from, to), '\n'),
-    refs = { { file = vim.fn.fnamemodify(step.file, ':p'), from = from, to = to } },
-  })
-end
-
-local requests = {
-  simplify = 'Apply the simplification from note [%d]: ',
-  remove = 'Remove this as described in note [%d]: ',
-}
-
--- From the code window: send the note on the cursor line (or just the line),
--- with a request typed in for simplify/remove notes.
-function M.ask_line()
-  local step = st.history[st.pos]
-  if not step then
-    vim.notify('walkthrough: no tour open', vim.log.levels.INFO)
-    return
-  end
-  local buf = vim.api.nvim_get_current_buf()
-  if vim.api.nvim_buf_get_name(buf) ~= vim.fn.fnamemodify(step.file, ':p') then
-    vim.notify('walkthrough: this file is not the current step\'s file', vim.log.levels.WARN)
-    return
-  end
-  local line = vim.api.nvim_win_get_cursor(0)[1]
-  local n
-  for num, l in pairs(st.note_lines) do
-    if l == line and (not n or num < n) then
-      n = num
-    end
-  end
-  local note = n and tour.find_note(step, n)
-  local request = note and requests[note.verdict] and requests[note.verdict]:format(n)
-  M.send({
-    text = table.concat(ask_context(step, n, line, line), '\n'),
-    refs = { { file = vim.fn.fnamemodify(step.file, ':p'), from = line, to = line } },
-    prefill = request,
-  })
 end
 
 return M

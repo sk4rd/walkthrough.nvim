@@ -175,7 +175,6 @@ check('moved: a MOVED badge is drawn', H.marks(function(d)
     return c[1]:match('MOVED') ~= nil and c[2] == 'WalkthroughMoved'
   end)
 end) == 1)
-check('moved: the panel heading names the verdict', H.panel_text():match('### %[1%] line 2 · moved · ran') ~= nil, H.panel_text())
 local hl = vim.api.nvim_get_hl(0, { name = 'WalkthroughMoved', link = false })
 check('moved: the badge colour is derived from Comment', hl.bold == true and hl.bg == vim.api.nvim_get_hl(0, { name = 'Comment', link = false }).fg)
 check('moved: a patch may set it', send('patch', { note = 1, verdict = 'keep' }) == 'ok' and send('patch', { note = 1, verdict = 'moved' }) == 'ok')

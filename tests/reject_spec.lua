@@ -99,7 +99,7 @@ open(repo, 'f.txt', hunks, { { line = 11, text = 'below' }, { line = 4, text = '
 choice = 2
 w.reject_group()
 check('confirm: names the group and the number of unstaged lines, default is cancel', #asked == 1
-  and asked[1].msg:match('Discard 2 unstaged lines of group "A" in f%.txt') and asked[1].default == 2
+  and asked[1].msg:match('Discard 2 unstaged lines of commit "A" in f%.txt') and asked[1].default == 2
   and asked[1].choices == '&Discard\n&Cancel', vim.inspect(asked))
 check('confirm: cancelling changes nothing', vim.deep_equal(disk(repo, 'f.txt'), final) and find('not rejected') ~= nil
   and not vim.bo.modified)
@@ -109,7 +109,7 @@ choice = 1
 reset_log()
 w.reject_group()
 n = H.wait_notify(find, 'discarded')
-check('reject: message says what was discarded', n ~= nil and n.msg == 'walkthrough: discarded 2 unstaged lines of group "A" in f.txt; staged changes were kept',
+check('reject: message says what was discarded', n ~= nil and n.msg == 'walkthrough: discarded 2 unstaged lines of commit "A" in f.txt; staged changes were kept',
   vim.inspect(log))
 local expected = edited({ [2] = 'A2', [5] = 'B5' })
 check('reject: the unstaged lines of group A are gone, group B\'s line stays', vim.deep_equal(disk(repo, 'f.txt'), expected), vim.inspect(disk(repo, 'f.txt')))
@@ -129,7 +129,9 @@ check('reject: the overlay is consistent', H.marks(function(d) return d.line_hl_
   and H.marks(function(d) return d.virt_text and d.virt_text[1][1]:match('stale') ~= nil end) == 0)
 reset_log()
 w.reject_group()
-check('reject: again has nothing left', find('nothing to reject') ~= nil and #asked == 2)
+-- gitsigns may still be reading the buffer after the first reject: the reject
+-- waits for it, so the answer is not immediate.
+check('reject: again has nothing left', H.wait_notify(find, 'nothing to reject') ~= nil and #asked == 2)
 
 -- A deleted line comes back, positions below it move down ---------------------------------------
 local gone = vim.deepcopy(base)
@@ -171,7 +173,7 @@ check('untracked file: refused', find('new to git') ~= nil and #asked == 0 and #
 reset_log()
 w.close()
 w.reject_group()
-check('no tour: says so', find('no tour open') ~= nil)
+check('no tour: says so', find('no review open') ~= nil)
 vim.cmd('Walkthrough reject')
 check(':Walkthrough reject exists and does not raise', true)
 
