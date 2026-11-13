@@ -809,17 +809,6 @@ else
       local f = r .. '/f.txt'
       send('load', { group = 'A', steps = { { file = f, hunks = { { from = 2, to = 4 }, { from = 8, to = 9, group = 'B' } } } } })
       send('load', { group = 'B', steps = { { file = f, hunks = { { from = 2, to = 4, group = 'A' }, { from = 8, to = 9 } } } } })
-      local buf = vim.fn.bufnr(f)
-      -- The case under test: gitsigns and git cut the second change differently. In the compact
-      -- view the file is hidden and gitsigns has no hunks of it to show before staging.
-      if view == 'file' then
-        local shapes_differ = H.wait(function()
-          local hs = gs.get_hunks(buf)
-          return hs ~= nil and #hs == 3
-        end) and select(2, H.git_in(r, 'diff', '-U0', '--', 'f.txt'):gsub('\n@@', '')) == 2
-        check(view .. ' view, histogram and linematch: gitsigns reports other hunks than git', shapes_differ,
-          vim.inspect(gs.get_hunks(buf)) .. H.git_in(r, 'diff', '-U0', '--', 'f.txt'))
-      end
       check(view .. ' view, histogram and linematch: the first commit is staged', stage_group_all(r, 'A', '%+  exit 2')
         and not index_diff(r):match('basename') and find('has not caught up') == nil, vim.inspect(log) .. index_diff(r))
       check(view .. ' view, histogram and linematch: the second commit is staged', stage_group_all(r, 'B', 'basename')
@@ -829,6 +818,48 @@ else
       end), H.git_in(r, 'diff', '--', 'f.txt'))
     end
     vim.o.diffopt = saved
+  end
+  -- The same without depending on how a gitsigns or Neovim version cuts hunks: a gitsigns that
+  -- reports three hunks where git reports two (a line added, the next one changed) agrees with git,
+  -- because its hunks lead from the buffer back to the text in the index. One whose hunks do not
+  -- (it still has what was there before a commit) does not agree.
+  do
+    w.close()
+    vim.cmd('silent! %bwipeout!')
+    local r = H.repo({ ['f.txt'] = { 'src=$1', 'dest=/tmp', 'tar -czf "$dest/backup.tar.gz" "$src"', 'echo done' } },
+      { ['f.txt'] = { 'src=$1', 'if [ ! -d "$src" ]; then', '  exit 2', 'fi', 'dest=/tmp', 'name=$(basename "$src")',
+        'tar -czf "$dest/$name.tar.gz" "$src"', 'echo done' } })
+    vim.cmd('edit ' .. vim.fn.fnameescape(r .. '/f.txt'))
+    local buf = vim.api.nvim_get_current_buf()
+    local function hunk(added_start, added, removed_start, removed)
+      return { added = { start = added_start, count = #added, lines = added },
+        removed = { start = removed_start, count = #removed, lines = removed } }
+    end
+    local cut_differently = {
+      hunk(2, { 'if [ ! -d "$src" ]; then', '  exit 2', 'fi' }, 1, {}),
+      hunk(6, { 'name=$(basename "$src")' }, 2, {}),
+      hunk(7, { 'tar -czf "$dest/$name.tar.gz" "$src"' }, 3, { 'tar -czf "$dest/backup.tar.gz" "$src"' }),
+    }
+    check('synced: git reports two hunks here', select(2, H.git_in(r, 'diff', '-U0', '--', 'f.txt'):gsub('\n@@', '')) == 2,
+      H.git_in(r, 'diff', '-U0', '--', 'f.txt'))
+    local stage = require('walkthrough.stage')
+    local result
+    stage.synced(buf, { get_hunks = function() return cut_differently end, refresh = function() end }, function(ok)
+      result = ok
+    end)
+    check('synced: hunks cut differently than git cuts them agree with git', H.wait(function() return result ~= nil end) and result == true)
+    -- Hunks of another state of the index: the first change is missing, as if it had been committed.
+    local stale = { cut_differently[2], cut_differently[3] }
+    result = nil
+    local asked = 0
+    local t0 = vim.uv.now()
+    stage.synced(buf, { get_hunks = function() return stale end, refresh = function() asked = asked + 1 end }, function(ok)
+      result = ok
+    end)
+    vim.wait(8000, function() return result ~= nil end, 50)
+    check('synced: hunks of another index do not agree; it asks gitsigns to read again, then gives up', result == false and asked >= 1
+      and vim.uv.now() - t0 >= 4000, vim.inspect({ result, asked, vim.uv.now() - t0 }))
+    vim.cmd('silent! %bwipeout!')
   end
 
   -- In the compact view the file is hidden. gitsigns' watcher notices a commit or reset made behind
