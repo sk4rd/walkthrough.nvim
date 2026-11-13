@@ -175,7 +175,7 @@ the prefix.
 | Write | `Pa` ask (also on a selection), `Pc` change request (also on a selection; in a plan both write a comment), `Pm` send, `Pt` open the thread, `Po` open a link of the thread, `PX` delete the thread, `P-` simpler, `P+` `P=` deeper |
 | Decide | `Py` accept, `Pd` decline, `P0` clear (all three only mark; `Pm` sends) |
 | Approve | `Ps` stage, `PS` stage all, `Px` reject (discard the commit's unstaged lines), `Pb` base, `PC` commit |
-| Plan | `PA` approve the plan, `PF` send plan feedback |
+| Plan | `PP` show the waiting plan, `PA` approve the plan, `PF` send plan feedback |
 | Help | `P?` cheat sheet |
 
 Panel: `<CR>` opens the entry, `s` `S` stage, `m` sends, `b` base, `x` reject,

@@ -192,7 +192,7 @@ local function all_mapped(prefix)
 end
 local bad = all_mapped('<leader>w')
 check('keys = true: every default key is mapped to its action, with a desc', #bad == 0, table.concat(bad, ', '))
-check('keys = true: the table has the keys of the spec', #keys.defaults == 34)
+check('keys = true: the table has the keys of the spec', #keys.defaults == 35)
 -- The final key set, group by group, exactly as the product defines it ("P" is the prefix).
 do
   local spec = {
@@ -203,7 +203,7 @@ do
     ['P+'] = 'deeper', ['P='] = 'deeper',
     Py = 'accept', Pd = 'decline', P0 = 'undecide',
     Ps = 'stage', PS = 'stage-all', Px = 'reject', Pb = 'base', PC = 'commit',
-    PA = 'plan-approve', PF = 'plan-feedback',
+    PP = 'plan', PA = 'plan-approve', PF = 'plan-feedback',
     ['P?'] = 'keys',
   }
   local got = {}
@@ -244,7 +244,7 @@ check('cheat sheet: the Write group', text:match('Write\n%s+<leader>wa%s+ask a q
 check('cheat sheet: no command for a mapped action', not text:match(':Walkthrough next'), text)
 check('cheat sheet: Start has review, request, resume and close, in that order', text:match('Start\n%s+<leader>wr%s+review the uncommitted changes[^\n]*\n%s+<leader>wM%s+ask the agent for the map of the change\n%s+<leader>wR%s+bring back the saved review\n%s+<leader>wq%s+end the session\n\nMove') ~= nil, text)
 check('cheat sheet: the snapshot action is not on it', not text:match('snapshot') and not text:match('reviewed'), text)
-check('cheat sheet: the Plan group names the plan keys', text:match('Plan\n%s+<leader>wA%s+approve the plan[^\n]*\n%s+<leader>wF%s+send the plan feedback') ~= nil, text)
+check('cheat sheet: the Plan group names the plan keys', text:match('Plan\n%s+<leader>wP%s+show the plan that waits for you\n%s+<leader>wA%s+approve the plan[^\n]*\n%s+<leader>wF%s+send the plan feedback') ~= nil, text)
 local panel_part = text:match('In the panel\n(.*)$') or ''
 check('cheat sheet: the panel keys', panel_part:match('<CR>%s+open the entry under the cursor') and panel_part:match('\n%s+s%s+stage the commit')
   and panel_part:match('\n%s+%?%s+show all keys'), panel_part)

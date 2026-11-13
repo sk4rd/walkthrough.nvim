@@ -211,6 +211,7 @@ local plugs = {
   request = plug(function() wt().request() end),
   close = plug(function() report(wt().close()) end),
   keys = plug(function() wt().keys() end),
+  plan = plug(function() wt().plan_show() end),
   ['plan-feedback'] = plug(function() wt().plan_feedback() end),
   ['plan-approve'] = plug(function() wt().plan_approve() end),
 }

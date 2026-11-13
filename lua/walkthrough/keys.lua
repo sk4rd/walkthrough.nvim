@@ -46,6 +46,7 @@ M.defaults = {
   { 'b', 'base' },
   { 'C', 'commit' },
   -- Plan
+  { 'P', 'plan' },
   { 'A', 'plan-approve' },
   { 'F', 'plan-feedback' },
   -- Help
@@ -131,6 +132,7 @@ local sheet = {
     { 'commit', 'check, message and commit what is staged', 'commit' },
   } },
   { 'Plan', {
+    { 'plan', 'show the plan that waits for you', 'plan' },
     { 'plan-approve', 'approve the plan (A in the plan)', 'plan approve' },
     { 'plan-feedback', 'send the plan feedback (F in the plan)', 'plan feedback' },
   } },

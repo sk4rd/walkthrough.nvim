@@ -392,6 +392,7 @@ visual mode, where they cover the selected lines):
   <Plug>(walkthrough-reject)             discard the commit's unstaged lines
   <Plug>(walkthrough-base)               show the base version
   <Plug>(walkthrough-commit)             check, message and commit
+  <Plug>(walkthrough-plan)               show the plan that waits for you
   <Plug>(walkthrough-plan-approve)       approve the plan
   <Plug>(walkthrough-plan-feedback)      send the plan feedback
   <Plug>(walkthrough-keys)               show the key cheat sheet
@@ -446,6 +447,7 @@ Approve
   Pb          base view
   PC          commit: check, message and commit what is staged
 Plan
+  PP          show the plan that waits for you
   PA          approve the plan
   PF          send the plan feedback
 Help
@@ -928,6 +930,8 @@ else of `change`, else the command). In that buffer:
                     `decide` and `explain` do nothing in a plan.
 
 The default keys `PA` and `PF` do the same from any buffer when one plan waits.
+`PP` (`:Walkthrough plan`) shows the plan again after you looked at something
+else in its window; `Pw` goes back to the review of a change.
 
 Feedback is one message: every comment not delivered yet, numbered and labelled
 `Comment t1 on plan line 4:` (or `lines 4-6`), with the plan lines it is about

@@ -416,6 +416,16 @@ file_win = vim.api.nvim_get_current_win()
 vim.cmd('Walkthrough plan')
 check(':Walkthrough plan goes to the window that shows it', vim.api.nvim_get_current_win() == reopened
   and #vim.api.nvim_tabpage_list_wins(0) == 2 and #vim.fn.win_findbuf(plan_buf) == 1 and file_win ~= reopened)
+-- The <Plug> mapping (default key: prefix P) does the same from anywhere.
+do
+  local plan_win = vim.api.nvim_get_current_win()
+  local plan_buf = vim.api.nvim_win_get_buf(plan_win)
+  vim.cmd('enew')
+  check('<Plug>(walkthrough-plan): the plan is not shown now', vim.api.nvim_win_get_buf(plan_win) ~= plan_buf)
+  vim.api.nvim_feedkeys(vim.keycode('<Plug>(walkthrough-plan)'), 'x', false)
+  check('<Plug>(walkthrough-plan) shows the waiting plan again', vim.api.nvim_get_current_buf() == plan_buf,
+    vim.api.nvim_buf_get_name(0))
+end
 vim.cmd('Walkthrough plan nonsense')
 check('an unknown argument is reported', find('plan takes') ~= nil)
 -- Approve and feedback work from outside the plan window when there is one plan.
@@ -435,18 +445,18 @@ check(':Walkthrough plan with none says so', find('no plan is waiting for review
 check('the completion offers approve and feedback', vim.deep_equal(vim.fn.getcompletion('Walkthrough plan ', 'cmdline'),
   { 'approve', 'feedback' }))
 check('the <Plug> mappings exist', vim.fn.maparg('<Plug>(walkthrough-plan-feedback)', 'n') ~= ''
-  and vim.fn.maparg('<Plug>(walkthrough-plan-approve)', 'n') ~= '')
+  and vim.fn.maparg('<Plug>(walkthrough-plan-approve)', 'n') ~= '' and vim.fn.maparg('<Plug>(walkthrough-plan)', 'n') ~= '')
 local keys_mod = require('walkthrough.keys')
 check('the cheat sheet lists both actions', vim.tbl_contains(keys_mod.actions(), 'plan-feedback')
   and vim.tbl_contains(keys_mod.actions(), 'plan-approve'))
-check('the default keys are PA and PF', (function()
+check('the default keys are PP, PA and PF', (function()
   local found = {}
   for _, k in ipairs(keys_mod.defaults) do
     if k[2]:match('^plan') then
       found[k[2]] = k[1] .. (k[4] and '!' or '')
     end
   end
-  return vim.deep_equal(found, { ['plan-approve'] = 'A', ['plan-feedback'] = 'F' })
+  return vim.deep_equal(found, { plan = 'P', ['plan-approve'] = 'A', ['plan-feedback'] = 'F' })
 end)())
 reset()
 
