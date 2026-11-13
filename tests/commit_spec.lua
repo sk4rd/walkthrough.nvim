@@ -175,7 +175,7 @@ local cfg = vim.api.nvim_win_get_config(d.win)
 check('the dialog is a centered float with an editable scratch buffer', cfg.relative == 'editor'
   and vim.bo[d.buf].modifiable and vim.bo[d.buf].buftype == 'acwrite' and vim.api.nvim_get_current_win() == d.win)
 local title = table.concat(vim.tbl_map(function(c) return c[1] end, cfg.title), '')
-check('the title names the keys', title:match('<CR>') and title:match('q') and title:match('cc') and title:match('<C%-g>'), title)
+check('the title names the keys', title:match('cc commit') and title:match('q cancel') and title:match('<C%-g>') and not title:match('<CR>'), title)
 check('the message area is empty at first, then the # lines', vim.api.nvim_buf_get_lines(d.buf, 0, 1, false)[1] == ''
   and vim.api.nvim_buf_get_lines(d.buf, 1, 2, false)[1]:sub(1, 1) == '#', text(d))
 check('the # lines name the group and the staged file', text(d):match('# Commit: A') and text(d):match('M  a%.txt'), text(d))
@@ -458,41 +458,70 @@ local function message_of(r)
   return H.git_in(r, 'log', '-1', '--format=%B')
 end
 
--- <CR>: subject and body, # lines and Co-authored-by lines out
+-- cc: subject and body, # lines and Co-authored-by lines out
 repo, d = commit_with({ 'feat(a): change a', '', 'The body.', 'co-AUTHORED-by: A Bot <bot@example.com>', '# a comment of mine', 'Last line.' })
 reset_log()
-press('<CR>')
-check('<CR>: commits', H.wait(function() return dialog() == nil end) and H.git_in(repo, 'rev-list', '--count', 'HEAD') == '2')
-check('<CR>: exactly the message, without # and Co-authored-by lines', message_of(repo) == 'feat(a): change a\n\nThe body.\nLast line.', message_of(repo))
-check('<CR>: says that a Co-authored-by line was removed', find('removed 1 Co%-authored%-by line') ~= nil, vim.inspect(log))
-check('<CR>: notifies with the short hash and the subject', find('committed ' .. H.git_in(repo, 'rev-parse', '--short', 'HEAD') .. ' feat%(a%): change a') ~= nil, vim.inspect(log))
-check('<CR>: what was staged is committed, the rest is not', H.git_in(repo, 'show', '--stat', '--format=', 'HEAD'):match('a%.txt') ~= nil
+press('cc')
+check('cc: commits', H.wait(function() return dialog() == nil end) and H.git_in(repo, 'rev-list', '--count', 'HEAD') == '2')
+check('cc: exactly the message, without # and Co-authored-by lines', message_of(repo) == 'feat(a): change a\n\nThe body.\nLast line.', message_of(repo))
+check('cc: says that a Co-authored-by line was removed', find('removed 1 Co%-authored%-by line') ~= nil, vim.inspect(log))
+check('cc: notifies with the short hash and the subject', find('committed ' .. H.git_in(repo, 'rev-parse', '--short', 'HEAD') .. ' feat%(a%): change a') ~= nil, vim.inspect(log))
+check('cc: what was staged is committed, the rest is not', H.git_in(repo, 'show', '--stat', '--format=', 'HEAD'):match('a%.txt') ~= nil
   and H.git_in(repo, 'status', '--porcelain'):match('M b%.txt') ~= nil)
-check('<CR>: the dialog window is gone', open_count() == 0)
+check('cc: the dialog window is gone', open_count() == 0)
 
 -- :w
 repo, d = commit_with({ 'chore: via write' })
 vim.cmd('write')
 check(':w commits', H.wait(function() return dialog() == nil end) and message_of(repo) == 'chore: via write', message_of(repo))
 
--- cc commits too, as in fugitive and Neogit; it is a mapping of this buffer only.
+-- cc is a mapping of this buffer only, in Normal mode.
 repo, d = commit_with({ 'chore: via cc' })
 check('cc is mapped in the dialog, in Normal mode only', vim.fn.maparg('cc', 'n') ~= '' and vim.fn.maparg('cc', 'i') == '')
+-- Enter never commits: it adds a line below the cursor line.
+local count_before = H.git_in(repo, 'rev-list', '--count', 'HEAD')
+vim.api.nvim_win_set_cursor(d.win, { 1, 0 })
+vim.api.nvim_feedkeys(vim.keycode('<CR>'), 'x', false)
+vim.wait(100)
+check('<CR> does not commit', dialog() ~= nil and H.git_in(repo, 'rev-list', '--count', 'HEAD') == count_before)
+check('<CR> adds a line below the cursor line and goes to it', vim.deep_equal(vim.api.nvim_buf_get_lines(d.buf, 0, 3, false),
+  { 'chore: via cc', '', '' }) and vim.api.nvim_win_get_cursor(d.win)[1] == 2 and vim.fn.mode() == 'n',
+  vim.inspect(vim.api.nvim_buf_get_lines(d.buf, 0, 4, false)))
+vim.api.nvim_buf_set_lines(d.buf, 1, 2, false, { 'the body' })
+-- In the # lines it adds the line at the end of the message, not among them.
+local total = vim.api.nvim_buf_line_count(d.buf)
+vim.api.nvim_win_set_cursor(d.win, { total, 0 })
+vim.api.nvim_feedkeys(vim.keycode('<CR>'), 'x', false)
+check('<CR> in the # lines adds the line at the end of the message', (function()
+  local all = vim.api.nvim_buf_get_lines(d.buf, 0, -1, false)
+  local row = vim.api.nvim_win_get_cursor(d.win)[1]
+  local comments_together = true
+  local seen_comment = false
+  for _, l in ipairs(all) do
+    if l:sub(1, 1) == '#' then
+      seen_comment = true
+    elseif seen_comment then
+      comments_together = false
+    end
+  end
+  return #all == total + 1 and all[row] == '' and all[row + 1]:sub(1, 1) == '#' and comments_together
+end)(), vim.inspect(vim.api.nvim_buf_get_lines(d.buf, 0, -1, false)))
 vim.api.nvim_feedkeys('cc', 'x', false)
-check('cc commits', H.wait(function() return dialog() == nil end) and message_of(repo) == 'chore: via cc', message_of(repo))
+check('cc commits, with the lines <CR> added', H.wait(function() return dialog() == nil end)
+  and message_of(repo) == 'chore: via cc\nthe body', message_of(repo))
 check('cc: outside the dialog it is not mapped', vim.fn.maparg('cc', 'n') == '')
 
 -- empty message refused
 repo, d = commit_with(nil)
 reset_log()
-press('<CR>')
+press('cc')
 check('an empty message is refused', find('commit message is empty') ~= nil and dialog() ~= nil and H.git_in(repo, 'rev-list', '--count', 'HEAD') == '1', vim.inspect(log))
 type_message(d, { '# nothing but a comment', '', '   ' })
-press('<CR>')
+press('cc')
 check('a message of # lines and blanks is empty too', H.git_in(repo, 'rev-list', '--count', 'HEAD') == '1' and dialog() ~= nil)
 type_message(d, { 'Co-authored-by: Only <only@example.com>' })
 reset_log()
-press('<CR>')
+press('cc')
 check('a message that is only a Co-authored-by line is empty after removal', find('commit message is empty') ~= nil
   and H.git_in(repo, 'rev-list', '--count', 'HEAD') == '1')
 press('q')
@@ -506,12 +535,12 @@ vim.fn.confirm = function(msg, choices, default)
 end
 asked, answer = {}, 2
 repo, d = commit_with({ 'feat: failing check' }, { check = 'exit 1' })
-press('<CR>')
+press('cc')
 check('failed check: asks, default no', #asked == 1 and asked[1].msg:match('^The check failed%.') and asked[1].msg:match('Commit anyway%?$')
   and asked[1].default == 2, vim.inspect(asked))
 check('failed check, answer no: nothing committed, dialog open', dialog() ~= nil and H.git_in(repo, 'rev-list', '--count', 'HEAD') == '1')
 asked, answer = {}, 1
-press('<CR>')
+press('cc')
 check('failed check, answer yes: committed', H.wait(function() return dialog() == nil end) and #asked == 1
   and message_of(repo) == 'feat: failing check', message_of(repo))
 
@@ -519,18 +548,18 @@ asked, answer = {}, 2
 flag = vim.fn.tempname()
 gated_check(flag, 0)
 repo, d = commit_with({ 'feat: running check' }, { check = vim.env.WALKTHROUGH_CHECK, wait = false })
-press('<CR>')
+press('cc')
 check('running check: asks, default no', #asked == 1 and asked[1].msg:match('^The check has not finished%.') and asked[1].default == 2
   and dialog() ~= nil and H.git_in(repo, 'rev-list', '--count', 'HEAD') == '1', vim.inspect(asked))
 asked, answer = {}, 1
-press('<CR>')
+press('cc')
 check('running check, answer yes: committed', H.wait(function() return dialog() == nil end)
   and message_of(repo) == 'feat: running check')
 release(flag)
 check('a passed check does not ask', (function()
   asked, answer = {}, 2
   local r, dd = commit_with({ 'feat: passing check' })
-  press('<CR>')
+  press('cc')
   return H.wait(function() return dialog() == nil end) and #asked == 0 and message_of(r) == 'feat: passing check'
 end)())
 vim.fn.confirm = confirm_orig
@@ -541,7 +570,7 @@ local hook = repo .. '/.git/hooks/pre-commit'
 vim.fn.writefile({ '#!/bin/sh', 'echo "hook says no" >&2', 'exit 1' }, hook)
 vim.uv.fs_chmod(hook, tonumber('755', 8))
 reset_log()
-press('<CR>')
+press('cc')
 check('hook fails: git\'s error is shown', H.wait(function() return find('commit failed: hook says no') ~= nil end), vim.inspect(log))
 check('hook fails: the dialog stays open, with the error in it', dialog() ~= nil and H.wait(function()
   return text(d):match('# commit FAILED: hook says no') ~= nil
@@ -550,7 +579,7 @@ check('hook fails: nothing was committed, the message is kept', H.git_in(repo, '
   and vim.api.nvim_buf_get_lines(d.buf, 0, 1, false)[1] == 'feat: hook says no' and cached(repo) ~= '')
 -- The hook is not skipped, and it can be fixed: the same dialog commits.
 vim.fn.writefile({ '#!/bin/sh', 'exit 0' }, hook)
-press('<CR>')
+press('cc')
 check('hook fixed: the same dialog commits', H.wait(function() return dialog() == nil end) and message_of(repo) == 'feat: hook says no')
 
 -- After the commit -------------------------------------------------------------------------
@@ -580,7 +609,7 @@ w.commit()
 d = dialog()
 H.wait(function() return d.check.state ~= 'running' end)
 type_message(d, { 'feat(a): change a' })
-press('<CR>')
+press('cc')
 check('after: committed', H.wait(function() return dialog() == nil end))
 check('after: the tour is gone from memory, with its threads', tour_of('A') == nil and threads_in('A') == 0)
 local on_disk = table.concat(vim.fn.readfile(store.path(root)), '\n')
@@ -618,7 +647,7 @@ w.commit()
 d = dialog()
 H.wait(function() return d.check.state ~= 'running' end)
 type_message(d, { 'feat(a): last one' })
-press('<CR>')
+press('cc')
 check('last: committed', H.wait(function() return dialog() == nil end))
 check('last: the panel is closed', st.panel_win == nil or not vim.api.nvim_win_is_valid(st.panel_win))
 check('last: no tour of a change is loaded, `Other files` is', tour_of('A') == nil and (function()
@@ -651,7 +680,7 @@ w.commit()
 d = dialog()
 H.wait(function() return d.check.state ~= 'running' end)
 type_message(d, { 'feat(a): from compact' })
-press('<CR>')
+press('cc')
 check('compact: committed', H.wait(function() return dialog() == nil end))
 check('compact: the code window shows the file, the compact buffer is gone', vim.bo[vim.api.nvim_win_get_buf(st.code_win)].buftype == ''
   and not vim.api.nvim_buf_is_valid(compact_buf), vim.api.nvim_buf_get_name(vim.api.nvim_win_get_buf(st.code_win)))
@@ -728,7 +757,7 @@ end)())
 check('review: a message without a group goes to the unnamed tour', send('patch', { commit_message = 'fix: unnamed' }) == 'ok'
   and vim.api.nvim_buf_get_lines(d.buf, 0, 1, false)[1] == 'fix: unnamed')
 H.wait(function() return d.check.state ~= 'running' end)
-press('<CR>')
+press('cc')
 check('review: committed, and the tour is gone', H.wait(function() return dialog() == nil end) and #st.tours == 0
   and message_of(repo) == 'fix: unnamed', message_of(repo))
 
@@ -783,7 +812,7 @@ else
     end
     H.wait(function() return dd.check.state ~= 'running' end)
     type_message(dd, { msg })
-    press('<CR>')
+    press('cc')
     return H.wait(function() return dialog() == nil end)
   end
   local function count(r)

@@ -7,7 +7,7 @@
 --     the message on top, then lines that start with `#` and are never part
 --     of it (the group, the staged files, the state of the check, whether the
 --     agent's proposal is awaited, warnings).
--- <CR> (or :w) makes the commit with `git commit -F -`, hooks enabled; q and
+-- cc (or :w) makes the commit with `git commit -F -`, hooks enabled; q and
 -- <Esc> cancel. After the commit the tour is gone with its threads and the
 -- next tour of the repository is shown.
 --
@@ -187,7 +187,7 @@ local function comment_lines(d)
     add('commit FAILED: ' .. d.error, 'DiagnosticError')
   end
   add('')
-  add('Lines that start with # are not part of the message. cc or <CR> commits, q cancels.')
+  add('Lines that start with # are not part of the message. cc commits, q cancels.')
   return lines, hls
 end
 
@@ -560,7 +560,7 @@ local function open_window(d)
   d.win = vim.api.nvim_open_win(buf, true, {
     relative = 'editor', width = math.max(width, 20), height = 10, row = 0, col = 0,
     style = 'minimal', border = 'rounded',
-    title = ' cc or <CR> commit · <C-g> ask the agent · q cancel ', title_pos = 'center',
+    title = ' cc commit · <C-g> ask the agent · q cancel ', title_pos = 'center',
   })
   vim.wo[d.win].wrap = true
   vim.wo[d.win].linebreak = true
@@ -570,9 +570,18 @@ local function open_window(d)
   local function map(lhs, fn, desc)
     vim.keymap.set('n', lhs, ui.safe(fn), { buffer = buf, nowait = true, desc = 'Walkthrough: ' .. desc })
   end
-  map('<CR>', function() commit_now(d) end, 'commit')
   -- `cc` as in fugitive and Neogit. It no longer changes a line here: `S` does.
   map('cc', function() commit_now(d) end, 'commit')
+  -- Enter never commits: a message is written with it, and a commit made by a
+  -- slip of the finger cannot be taken back as easily. It adds a line, as it
+  -- does while typing: below the cursor line, or at the end of the message
+  -- when the cursor is in the `#` lines.
+  map('<CR>', function()
+    local at = math.min(vim.api.nvim_win_get_cursor(d.win)[1], block_row(d))
+    vim.api.nvim_buf_set_lines(d.buf, at, at, false, { '' })
+    vim.api.nvim_win_set_cursor(d.win, { at + 1, 0 })
+    resize(d)
+  end, 'add a line')
   map('q', function() cancel(d) end, 'cancel the commit')
   map('<Esc>', function() cancel(d) end, 'cancel the commit')
   -- The message is the user's to write. The agent proposes one only on demand.
