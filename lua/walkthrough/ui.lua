@@ -664,14 +664,22 @@ function M.plug_keys()
     end
   end
   vim.list_extend(maps, vim.api.nvim_get_keymap('n'))
-  local leader = vim.fn.keytrans(vim.g.mapleader or '\\')
+  -- Neovim versions write the same key differently (`\\` or `<Bslash>`), in
+  -- mapping lists and in keytrans(). Both sides go through one notation
+  -- before the leader is recognised.
+  local function notation(keys)
+    return vim.fn.keytrans(vim.api.nvim_replace_termcodes(keys, true, true, true))
+  end
+  local leader = notation(vim.g.mapleader or '\\')
   local keys = {}
   for _, m in ipairs(maps) do
     local name = m.rhs and m.rhs:match('^<Plug>%(walkthrough%-([%w-]+)%)$')
     if name then
-      local lhs = m.lhs
+      local lhs = notation(m.lhs)
       if lhs:sub(1, #leader) == leader and #lhs > #leader then
         lhs = '<leader>' .. lhs:sub(#leader + 1)
+      else
+        lhs = m.lhs
       end
       keys[name] = keys[name] or {}
       if not vim.tbl_contains(keys[name], lhs) then
