@@ -104,6 +104,73 @@ local function gitsigns_view(buf, gitsigns)
   return lines, removed
 end
 
+-- The file of `buf` as the index has it, as lines; nil when git cannot say.
+local function index_lines(buf)
+  local file = vim.api.nvim_buf_get_name(buf)
+  local res = git.run(vim.fs.dirname(file), { 'show', ':./' .. vim.fs.basename(file) })
+  if res.code ~= 0 then
+    return nil
+  end
+  local lines = vim.split(res.stdout or '', '\n', { plain = true })
+  if lines[#lines] == '' then
+    table.remove(lines)
+  end
+  return lines
+end
+
+-- The same text, whatever the line ending and whether the file is empty.
+local function same_text(a, b)
+  if #a ~= #b then
+    return false
+  end
+  for i = 1, #a do
+    if a[i]:gsub('\r$', '') ~= b[i]:gsub('\r$', '') then
+      return false
+    end
+  end
+  return true
+end
+
+-- The index text that gitsigns' hunks of the buffer stand for: the buffer
+-- with every hunk taken back (the added lines out, the removed lines in).
+-- Nil when gitsigns has no hunks to tell. If its hunks are those of the
+-- buffer against the index of now, this is the index text, however its diff
+-- algorithm cut the changes into hunks. git and gitsigns need not cut them
+-- the same way: with `algorithm:histogram` or `linematch` in 'diffopt' they
+-- do not.
+local function index_by_gitsigns(buf, gitsigns)
+  local ok, hunks = pcall(gitsigns.get_hunks, buf)
+  if not ok or not hunks then
+    return nil
+  end
+  local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+  if #lines == 1 and lines[1] == '' then
+    lines = {}
+  end
+  local sorted = vim.list_slice(hunks)
+  table.sort(sorted, function(a, b)
+    return a.added.start > b.added.start
+  end)
+  for _, h in ipairs(sorted) do
+    local removed = h.removed.lines or {}
+    if #removed ~= h.removed.count then
+      return nil
+    end
+    -- A deletion sits after line `added.start`; added lines start on it.
+    local first = h.added.count == 0 and h.added.start + 1 or h.added.start
+    if first < 1 or first + h.added.count - 1 > #lines then
+      return nil
+    end
+    for _ = 1, h.added.count do
+      table.remove(lines, first)
+    end
+    for i, l in ipairs(removed) do
+      table.insert(lines, first + i - 1, l)
+    end
+  end
+  return lines
+end
+
 -- gitsigns stages and resets from its own cache of the buffer's hunks (the
 -- buffer against the index). That cache is dropped when HEAD or the index
 -- change under it (a commit, a reset, another git process) and is rebuilt
@@ -112,7 +179,9 @@ end
 -- `await_attached` cannot tell, and a `stage_hunk` run before the rebuild
 -- finds no hunk and stages nothing. So before gitsigns is asked to change
 -- anything, wait until what it has agrees with what git reports, asking it
--- to read the buffer again (its `refresh`) when it does not. Calls
+-- to read the buffer again (its `refresh`) when it does not. They agree when
+-- gitsigns' hunks lead from the buffer back to the text in the index (see
+-- index_by_gitsigns), or when both report the same lines. Calls
 -- `done(true)` when they agree, `done(false)` after about 5 seconds when
 -- they do not. Never raises.
 local SYNC_TIMEOUT = 5000
@@ -121,9 +190,16 @@ local function synced(buf, gitsigns, done)
   if not ok then
     return done(false)
   end
+  local in_index = index_lines(buf)
   local function agrees()
     if not vim.api.nvim_buf_is_valid(buf) then
       return false
+    end
+    if in_index then
+      local rebuilt = index_by_gitsigns(buf, gitsigns)
+      if rebuilt and same_text(rebuilt, in_index) then
+        return true
+      end
     end
     local lines, removed = gitsigns_view(buf, gitsigns)
     return lines ~= nil and vim.deep_equal(lines, expected_lines) and vim.deep_equal(removed, expected_removed)
