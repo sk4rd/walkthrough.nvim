@@ -40,11 +40,13 @@ M.internal_step_fields = { next_note = true, _snap = true, seen = true, threads 
 -- decision_sent: the agent has been told.
 M.internal_note_fields = { n = true, stale = true, decision = true, decision_sent = true }
 M.internal_hunk_fields = { stale = true }
--- sent: how many messages the agent has been given; decision_sent: it has
--- been told the user's decision on a proposal.
+-- sent: how many messages the agent has been given; decision: the user's
+-- stance on the proposal ('accept' or 'reject'); decision_sent: the agent has
+-- been told. A decision is marked first and delivered with `send`; the state
+-- becomes accepted or declined only then (see M.thread_decision).
 M.thread_fields = {
   id = true, kind = true, from = true, to = true, messages = true, state = true, sent = true, stale = true,
-  decision_sent = true,
+  decision = true, decision_sent = true,
 }
 M.message_fields = { by = true, text = true, proposal = true }
 -- What a patch may say about a thread. Creating, deleting and deciding
@@ -218,6 +220,9 @@ function M.validate_step(step, opts)
         if th[k] ~= nil and type(th[k]) ~= 'boolean' then
           return fail(sub, ('"%s" must be true or false'):format(k))
         end
+      end
+      if th.decision ~= nil and not M.decisions[th.decision] then
+        return fail(sub, '"decision" must be accept or reject')
       end
     end
   end
@@ -429,6 +434,27 @@ function M.pending_index(th)
       return i
     end
   end
+end
+
+--- The user's decision on the proposal of `th`: 'accept', 'reject' or nil,
+--- and whether the agent has been told. A decision is marked with `decision`
+--- and `decision_sent`; a thread stored before decisions were collected has
+--- only the state (accepted or declined), which then means it was sent.
+function M.thread_decision(th)
+  if th.decision then
+    return th.decision, th.decision_sent == true
+  end
+  if th.state == 'accepted' then
+    return 'accept', true
+  elseif th.state == 'declined' then
+    return 'reject', true
+  end
+end
+
+--- Whether `th` carries a decision of the user that the agent has not been told.
+function M.unsent_decision(th)
+  local d, sent = M.thread_decision(th)
+  return d ~= nil and not sent
 end
 
 --- The last message of `th` written by `by` ('user' or 'agent'), and its index.
@@ -659,6 +685,15 @@ local function patch_thread(i, history, changed, p, limit)
   if p.answer ~= nil then
     table.insert(th.messages, { by = 'agent', text = M.text_of(p.answer), proposal = p.proposal or nil })
     th.state = p.proposal and 'proposed' or 'answered'
+    if p.proposal then
+      -- A decision belongs to the proposal it was made on.
+      th.decision, th.decision_sent = nil, nil
+    end
+  end
+  -- A decision the user marked and the agent was not told cannot outlive a
+  -- change of what it is about.
+  if th.decision and not th.decision_sent then
+    th.decision = nil
   end
   -- What the user wrote before this answer is answered by it; a message of
   -- the user still waiting to be sent keeps its place.

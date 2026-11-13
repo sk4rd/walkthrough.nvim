@@ -241,20 +241,13 @@ local c = th('t2')
 check('reply: ask on the lines of a change request replies in it', #threads() == 2 and #c.messages == 2 and c.messages[2].text == 'and add a test',
   vim.inspect(threads()))
 check('reply: ... collected, not sent', #sent == 3 and c.state == 'draft' and c.sent == 0)
--- Closed threads take no reply: a new thread starts.
+-- A closed thread is continued, not replaced by a new one (decision_spec.lua
+-- has the details).
 send('patch', { thread = 't2', answer = 'done it', done = true })
 at(9)
 w.ask('different matter')
-check('reply: lines of a done thread start a new thread', #threads() == 3 and th('t3') and th('t3').messages[1].text == 'different matter'
-  and #th('t2').messages == 3, vim.inspect(threads()))
-at(14)
-w.change('declined one')
-send('patch', { thread = 't4', answer = 'a proposal', proposal = true })
-w.decide('reject')
-at(14)
-w.ask('after declining')
-check('reply: lines of a declined thread start a new thread', #threads() == 5 and th('t4').state == 'declined'
-  and th('t5').messages[1].text == 'after declining', vim.inspect(threads()))
+check('reply: lines of a done thread continue it', #threads() == 2 and #th('t2').messages == 4
+  and th('t2').messages[4].text == 'different matter' and th('t2').state == 'draft', vim.inspect(threads()))
 
 -- Change requests: collected ---------------------------------------------------------------------------
 open()
@@ -458,13 +451,17 @@ sent = {}
 at(9)
 w.decide('accept')
 table.insert(trail, th('t1').state)
-check('flow: accept is sent at once', #sent == 1 and th('t1').decision_sent == true and th('t1').state == 'accepted'
+check('flow: accept only marks the proposal, nothing is sent', #sent == 0 and th('t1').decision == 'accept' and not th('t1').decision_sent
+  and th('t1').state == 'proposed')
+w.send()
+table.insert(trail, th('t1').state)
+check('flow: send delivers it: accepted, with what the agent does', #sent == 1 and th('t1').decision_sent == true and th('t1').state == 'accepted'
   and sent[1].text:match('the user accepted it') and sent[1].text:match('{ "thread": "t1", "answer": "<what you changed>", "done": true }')
   and sent[1].text:match('You %(agent%) %(proposal%): I would rename x to y'), sent[1] and sent[1].text)
 send('patch', { thread = 't1', answer = 'renamed', done = true })
 table.insert(trail, th('t1').state)
-check('flow: change -> draft -> waiting -> proposed -> accepted -> done', table.concat(trail, ',') == 'draft,waiting,proposed,accepted,done',
-  table.concat(trail, ','))
+check('flow: change -> draft -> waiting -> proposed -> (marked) -> accepted -> done',
+  table.concat(trail, ',') == 'draft,waiting,proposed,proposed,accepted,done', table.concat(trail, ','))
 check('flow: the drawing follows', virt('^» t1 %(done%) you: rename it$') == 1)
 
 -- Declined.
@@ -476,7 +473,8 @@ send('patch', { thread = 't1', answer = 'rename x', proposal = true })
 sent = {}
 at(9)
 w.decide('reject')
-check('flow: declined is sent at once and says to leave the code', th('t1').state == 'declined' and #sent == 1
+w.send()
+check('flow: declined is sent with send and says to leave the code', th('t1').state == 'declined' and #sent == 1
   and sent[1].text:match('the user declined it') and sent[1].text:match('leave the code as it is'), sent[1] and sent[1].text)
 check('flow: ... and is dimmed', dimmed() == 1 and virt('^» t1 %(declined%) you:') == 1)
 sent = {}
@@ -497,10 +495,8 @@ check('decide: a thread that is not a proposal is nothing to decide', find('noth
 at(6)
 w.decide('accept')
 local note = st.history[1].notes[1]
-check('decide: on a note, stored and sent at once', note.decision == 'accept' and note.decision_sent == true and #sent == 2
-  and sent[2].text:match('Decision on finding %[1%] at a%.txt:6, step 1, your verdict: simplify') and sent[2].text:match('accepted your verdict')
-  and sent[2].text:match('{ "step": 1, "note": 1, "verdict": "done" }'), sent[2] and sent[2].text)
-check('decide: badge next to the verdict', H.marks(function(d)
+check('decide: on a note, only marked', note.decision == 'accept' and not note.decision_sent and #sent == 1, vim.inspect(note))
+check('decide: badge next to the verdict, with the hint that it is not sent', H.marks(function(d)
   if not d.virt_text then
     return false
   end
@@ -509,13 +505,12 @@ check('decide: badge next to the verdict', H.marks(function(d)
     table.insert(txt, ch[1])
   end
   local joined = table.concat(txt)
-  return joined:match('SIMPLIFY') and joined:match('✓ accepted') and joined:match('read') ~= nil
+  return joined:match('SIMPLIFY') and joined:match('✓ accepted, not sent') and joined:match('read') ~= nil
 end, vim.fn.bufnr(a)) == 1)
 w.decide('reject')
-check('decide: reject replaces it and is sent again, leaving the code', note.decision == 'reject' and #sent == 3
-  and sent[3].text:match('rejected your verdict') and sent[3].text:match('Leave the code as it is and acknowledge'), sent[3] and sent[3].text)
+check('decide: the other key switches it, nothing is sent', note.decision == 'reject' and #sent == 1)
 w.decide(nil)
-check('decide: nil clears it, nothing is sent', note.decision == nil and #sent == 3)
+check('decide: nil clears it, nothing is sent', note.decision == nil and #sent == 1)
 w.decide('accept')
 w.decide('clear')
 check('decide: "clear" clears it too', note.decision == nil)
@@ -524,6 +519,7 @@ w.decide('maybe')
 check('decide: other values are refused', find('accept, reject or clear') ~= nil and note.decision == nil)
 at(15)
 w.decide('accept')
+w.send()
 check('decide: a keep verdict has nothing to apply', sent[#sent].text:match('Nothing to change; acknowledge'), sent[#sent].text)
 at(12)
 vim.cmd('Walkthrough decide reject')
@@ -539,66 +535,42 @@ check('decide: ... nor with a replaced list of notes', send('patch', { notes = {
 check('decide: ... nor from JSON', send('load', { steps = { { file = a, notes = { { line = 3, decision = 'accept' } } } } })
   :match('unknown note field "decision"') ~= nil)
 
--- A decision that could not be sent stays for the next send.
+-- A send that fails keeps the decisions for the next one.
 open()
 at(9)
 w.change('rename it')
 w.send()
 send('patch', { thread = 't1', answer = 'rename x', proposal = true })
-raising()
-reset_log()
 at(9)
 w.decide('accept')
-check('decide: a failing sender keeps the decision and says so', th('t1').state == 'accepted' and not th('t1').decision_sent
-  and find('kept for send') ~= nil, vim.inspect(log))
-w.decide('clear')
-check('decide: ... it can still be taken back', th('t1').state == 'proposed')
-w.decide('accept')
-st.config.sender = collecting
-sent = {}
-w.send()
-check('decide: ... and goes out with send', th('t1').decision_sent == true and #sent == 1 and sent[1].text:match('the user accepted it'), vim.inspect(sent))
 at(6)
-raising()
 w.decide('accept')
-check('decide: a note decision that failed is not marked sent', st.history[1].notes[1].decision == 'accept' and not st.history[1].notes[1].decision_sent)
+raising()
+reset_log()
+w.send()
+check('decide: a failing sender keeps the decisions and says so', th('t1').state == 'proposed' and th('t1').decision == 'accept'
+  and not th('t1').decision_sent and not st.history[1].notes[1].decision_sent and find('terminal is gone') ~= nil, vim.inspect(log))
+at(9)
+w.decide('clear')
+check('decide: ... they can still be taken back', th('t1').decision == nil and th('t1').state == 'proposed')
+w.decide('accept')
 st.config.sender = collecting
 sent = {}
 w.send()
-check('decide: ... and goes out with send', st.history[1].notes[1].decision_sent == true and #sent == 1)
+check('decide: ... and go out with the next send', th('t1').decision_sent == true and th('t1').state == 'accepted'
+  and st.history[1].notes[1].decision_sent == true and #sent == 1 and sent[1].text:match('%(2 items%)')
+  and sent[1].text:match('the user accepted it'), vim.inspect(sent))
 check('decide: ... the inbox lists a thread decision', (function()
   at(14)
   w.change('another')
   w.send()
   send('patch', { thread = 't2', answer = 'p', proposal = true })
   at(14)
-  raising()
   w.decide('reject')
   local items = vim.json.decode(w.inbox()).items
-  st.config.sender = collecting
   return #items == 1 and items[1].kind == 'decision' and items[1].id == 't2' and items[1].decision == 'reject'
-    and items[1].text == 'p'
+    and items[1].state == 'declined' and items[1].text == 'p' and th('t2').state == 'declined'
 end)())
-
--- A reply written meanwhile does not hide the decision: both go out together.
-open()
-at(9)
-w.change('rename it')
-w.send()
-send('patch', { thread = 't1', answer = 'rename x', proposal = true })
-raising()
-at(9)
-w.decide('accept')
-st.config.sender = collecting
-at(9)
-w.ask('and keep the old name as an alias')
-check('decide: a reply keeps an undelivered acceptance', th('t1').state == 'accepted' and not th('t1').decision_sent and #th('t1').messages == 3)
-sent = {}
-w.send()
-check('decide: ... and send delivers the decision and the reply in one message', #sent == 1 and sent[1].text:match('%(2 items%)')
-  and sent[1].text:match('the user accepted it') and sent[1].text:match('and keep the old name') and th('t1').decision_sent == true
-  and sent[1].text:match('taking this message into account') and not sent[1].text:match('Do not edit any code yet'),
-  sent[1] and sent[1].text)
 
 -- The messages to the agent --------------------------------------------------------------------------------
 open()

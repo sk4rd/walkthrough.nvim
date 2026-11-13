@@ -109,6 +109,8 @@ assert(send('load', { group = 'Configurable destination', steps = {
 assert(send('load', { group = 'Usage check', steps = {
   { file = usage, title = 'adds the usage check', hunks = { { from = 5, group = 'Usage check' } } },
 } }) == 'ok')
+-- The second commit is added without taking over; the checks below start on it.
+w.group('Usage check')
 fix_width(40)
 check('the panel is a plain scratch buffer: no filetype, no markdown', vim.bo[st.panel_buf].filetype == '' and vim.bo[st.panel_buf].buftype == 'nofile'
   and vim.bo[st.panel_buf].modifiable == false)

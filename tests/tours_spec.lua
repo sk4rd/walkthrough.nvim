@@ -31,10 +31,17 @@ check('step 2 is seen too', status().seen == 2)
 
 check('load B', send('load', { group = 'B', steps = { { file = f, title = 'b1' }, { file = new, title = 'b2' }, { file = g, title = 'b3' } } }) == 'ok')
 s = status()
-check('a different group is added and becomes active', #s.groups == 2 and s.group == 'B' and s.total == 3 and s.step == 1)
-check('groups: A is not current, B is', s.groups[1].group == 'A' and not s.groups[1].current and s.groups[2].current, vim.inspect(s.groups))
-check('groups: counts per tour', s.groups[1].steps == 2 and s.groups[1].seen == 2 and s.groups[2].steps == 3 and s.groups[2].seen == 1)
-check('st.history, st.pos, st.tour_group follow the active tour', st.history == st.tours[2].steps and st.pos == 1 and st.tour_group == 'B')
+-- The first commit of a map is the current one: a later commit is added and
+-- the user stays where they are (the order of commits has its own checks in
+-- tests/map_order_spec.lua).
+check('a different group is added; A stays the active tour, at its step', #s.groups == 2 and s.group == 'A' and s.total == 2
+  and s.step == 2, vim.inspect(s))
+check('groups: A is current, B is not', s.groups[1].group == 'A' and s.groups[1].current and not s.groups[2].current,
+  vim.inspect(s.groups))
+check('groups: counts per tour', s.groups[1].steps == 2 and s.groups[1].seen == 2 and s.groups[2].steps == 3 and s.groups[2].seen == 0)
+check('st.history, st.pos, st.tour_group follow the active tour', st.history == st.tours[1].steps and st.pos == 2 and st.tour_group == 'A')
+w.group('B')
+check('group("B") shows B at its first step', status().group == 'B' and status().step == 1 and status().seen == 1)
 
 -- Switching ------------------------------------------------------------------------
 w.step(1)
@@ -75,12 +82,13 @@ check('replace A', send('load', { group = 'A', steps = {
   { file = f, title = 'a1' }, { file = g, title = 'a2' }, { file = g, title = 'a2 but different' }, { file = f, title = 'a4' },
 } }) == 'ok')
 s = status()
-check('replace: still two tours, A first, now active', #s.groups == 2 and s.groups[1].group == 'A' and s.groups[1].current
-  and s.groups[1].steps == 4, vim.inspect(s.groups))
+check('replace: still two tours, A first, and B stays on screen', #s.groups == 2 and s.groups[1].group == 'A'
+  and not s.groups[1].current and s.groups[2].current and s.groups[1].steps == 4 and s.group == 'B', vim.inspect(s.groups))
+check('replace: the user stays where they were in A', st.tours[1].pos == 2, st.tours[1].pos)
 local a = st.tours[1].steps
 check('replace: seen is kept for the same file and title', a[1].seen == true and a[2].seen == true)
 check('replace: ... and not for new or retitled steps', not a[3].seen and not a[4].seen)
-check('replace: status counts them', s.seen == 2 and s.groups[1].seen == 2)
+check('replace: status counts them', s.groups[1].seen == 2 and s.seen == 2)
 check('replace: B was left alone', st.tours[2].steps[1].title == 'b1 renamed' and #st.tours[2].steps == 3)
 
 -- seen is internal --------------------------------------------------------------------

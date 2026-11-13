@@ -67,10 +67,11 @@ local function setup(opts)
     ['a.txt'] = edited(base, 3, 'A3'), ['b.txt'] = edited(lines(6, 'b'), 3, 'B3'), ['c.txt'] = edited(lines(6, 'c'), 3, 'C3'),
   })
   vim.cmd('cd ' .. vim.fn.fnameescape(repo))
+  send('load', { group = 'A', steps = { { file = repo .. '/a.txt', title = 'the a change', diff = opts.diff } } })
   if not opts.single then
+    -- The first commit of a map is the current one: B joins without taking over.
     send('load', { group = 'B', steps = { { file = repo .. '/b.txt', title = 'the b change' } } })
   end
-  send('load', { group = 'A', steps = { { file = repo .. '/a.txt', title = 'the a change', diff = opts.diff } } })
   if not opts.nothing_staged then
     H.git_in(repo, 'add', 'a.txt')
   end

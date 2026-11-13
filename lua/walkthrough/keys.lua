@@ -115,8 +115,8 @@ local sheet = {
     { 'deeper', 'ask for a deeper answer here', 'explain deeper' },
   } },
   { 'Decide', {
-    { 'accept', 'accept the proposal or finding here (sent at once)', 'decide accept' },
-    { 'decline', 'decline the proposal or finding here (sent at once)', 'decide reject' },
+    { 'accept', 'accept the proposal or finding here (marked; send delivers it)', 'decide accept' },
+    { 'decline', 'decline the proposal or finding here (marked; send delivers it)', 'decide reject' },
     { 'undecide', 'clear a decision that is not sent yet', 'decide clear' },
   } },
   { 'Approve', {

@@ -413,6 +413,7 @@ check('file to compact: a file opened by hand finds its entry', cursor_line() ==
 reset()
 send('load', tour_a())
 send('load', { group = 'Other', steps = { { file = g, title = 'g only' } } })
+w.group('Other')
 check('a tour with no changed line opens in the file view', not is_compact() and code_name() == g and status().view == 'file')
 w.group('A')
 check('group switch: A opens in the compact view', is_compact())
@@ -646,7 +647,10 @@ check('patch: the cursor stays where it was', cursor() == row_of('%+ A2'))
 sent = {}
 at(row_of('%+ A2'))
 w.decide('accept')
-check('decide: accepts the proposal under the cursor', threads_of(1)[2].state == 'accepted' and #sent == 1, vim.inspect(threads_of(1)[2]))
+check('decide: marks the proposal under the cursor, nothing is sent', threads_of(1)[2].decision == 'accept'
+  and threads_of(1)[2].state == 'proposed' and #sent == 0, vim.inspect(threads_of(1)[2]))
+check('decide: ... and the label under the code says so', virt_row('(accepted, not sent)') == row_of('%+ A2'),
+  vim.inspect(vtexts(code_buf())))
 at(row_of('%+ A3'))
 reset_log()
 w.decide('accept')

@@ -6,9 +6,10 @@
 -- (anchor.lua).
 --
 -- A question is sent at once. A change request is collected until `send`,
--- because the user usually writes several. A decision is sent at once. What
--- could not be delivered stays in the thread and goes out with the next
--- `send`.
+-- because the user usually writes several. A decision on a proposal or a
+-- finding is collected too: it can be changed or taken back until `send`
+-- delivers it, together with the change requests and the replies. What could
+-- not be delivered stays in the thread and goes out with the next `send`.
 --
 -- Entry points that need the cursor (ask, change, decide, explain, thread)
 -- work in the current window on any file: the file is found among the steps
@@ -24,6 +25,7 @@ local send = require('walkthrough.send')
 local compact = require('walkthrough.compact')
 local commit = require('walkthrough.commit')
 local request = require('walkthrough.request')
+local input = require('walkthrough.input')
 
 local M = {}
 
@@ -201,10 +203,16 @@ local function thread_item(t, si, step, th)
   }
 end
 
+-- A thread becomes accepted or declined only now that the agent is told.
 local function decision_item(t, si, step, x)
   return {
     kind = 'decision', t = t, si = si, step = step, thread = x.id and x or nil, note = x.n and x or nil,
-    mark = function() x.decision_sent = true end,
+    mark = function()
+      x.decision_sent = true
+      if x.id then
+        x.state = tour.thread_decision(x) == 'accept' and 'accepted' or 'declined'
+      end
+    end,
   }
 end
 
@@ -213,6 +221,16 @@ end
 local function squash(text, cap)
   text = tour.text_of(text):gsub('%s*\n%s*', ' / ')
   return (#text > cap and (text:sub(1, cap - 3) .. '...') or text)
+end
+
+-- The text the user wrote as it was written: its lines kept, the lines after
+-- the first indented under the label, the whole capped.
+local function written(text, cap, indent)
+  text = vim.trim(tour.text_of(text))
+  if #text > cap then
+    text = text:sub(1, cap - 3) .. '...'
+  end
+  return (text:gsub('\n', '\n' .. indent))
 end
 
 -- Up to three lines of the code on `from`..`to`, trimmed and capped.
@@ -228,23 +246,39 @@ end
 
 local kind_label = { question = 'Question', change = 'Change request' }
 
+-- Whether the last message of the agent before message `first` of `th` is a
+-- proposal: the user then answers it.
+local function answers_proposal(th, first)
+  for i = first - 1, 1, -1 do
+    if th.messages[i].by == 'agent' then
+      return th.messages[i].proposal == true
+    end
+  end
+  return false
+end
+
 -- One sentence of what is expected, with the exact patch form.
 local function expectation(item)
   local th = item.thread
   if item.kind == 'thread' then
-    if th.state == 'accepted' then
-      -- A reply written before the acceptance was delivered.
+    local d, sent = tour.thread_decision(th)
+    if d == 'accept' and sent then
+      -- A reply written after the acceptance: the proposal still stands.
       return ('Your proposal in this thread was accepted: apply it, taking this message into account, then report'
         .. ' with a patch: { "thread": "%s", "answer": "<what you changed>", "done": true }'):format(th.id)
     end
     if th.kind == 'question' then
       return ('Answer it without changing any code, with a patch: { "thread": "%s", "answer": "..." }'):format(th.id)
     end
+    if answers_proposal(th, tour.pending_index(th) or (#th.messages + 1)) then
+      return ('The user asks you to revise your proposal: reply with a new proposal, as a patch:'
+        .. ' { "thread": "%s", "answer": "<the new proposal>", "proposal": true }. Do not edit any code.'):format(th.id)
+    end
     return ('Do not edit any code yet: reply with a proposal of what you would change, as a patch:'
       .. ' { "thread": "%s", "answer": "<the proposal>", "proposal": true }'):format(th.id)
   end
   if th then
-    if th.state == 'accepted' then
+    if tour.thread_decision(th) == 'accept' then
       return ('The user accepted your proposal: apply it now, then report with a patch:'
         .. ' { "thread": "%s", "answer": "<what you changed>", "done": true }'):format(th.id)
     end
@@ -330,7 +364,8 @@ function M.build_message(t, items)
         table.insert(lines, ('%d. %s %s at %s:%s%s'):format(i, kind_label[th.kind], th.id, file, where(from, to), place(item, it, many)))
       else
         table.insert(lines, ('%d. Decision on your proposal in thread %s (%s) at %s:%s%s: the user %s it.'):format(
-          i, th.id, th.kind, file, where(from, to), place(item, it, many), th.state == 'accepted' and 'accepted' or 'declined'))
+          i, th.id, th.kind, file, where(from, to), place(item, it, many),
+          tour.thread_decision(th) == 'accept' and 'accepted' or 'declined'))
       end
     else
       from, to = n.line, n.line
@@ -362,7 +397,7 @@ function M.build_message(t, items)
       end
       for j = first, #th.messages do
         if th.messages[j].by == 'user' then
-          table.insert(lines, '   User: ' .. squash(th.messages[j].text, 1000))
+          table.insert(lines, '   User: ' .. written(th.messages[j].text, 1000, '         '))
         end
       end
     else
@@ -392,7 +427,7 @@ local function collect(t, all)
       return a.id < b.id
     end)
     for _, th in ipairs(threads) do
-      if (th.state == 'accepted' or th.state == 'declined') and not th.decision_sent then
+      if tour.unsent_decision(th) then
         table.insert(items, decision_item(t, si, step, th))
       end
       if not finished(th) and (tour.pending_index(th) or (all and th.state == 'waiting')) then
@@ -510,9 +545,10 @@ function M.inbox(all)
         })
       elseif th then
         local last = tour.last_message(th, 'agent')
+        local d = tour.thread_decision(th)
         table.insert(out, {
           kind = 'decision', id = th.id, step = item.si, file = file, from = th.from, to = th.to,
-          decision = th.state == 'accepted' and 'accept' or 'reject', state = th.state, text = last and last.text,
+          decision = d, state = d == 'accept' and 'accepted' or 'declined', text = last and last.text,
         })
       else
         local n = item.note
@@ -546,20 +582,26 @@ end
 
 --- Add `text` as a message of the user to `th` (of `step`, in tour `t`). A
 --- question is sent at once, a change request is collected until `send`.
---- Returns whether it went out. A closed thread takes no reply.
+--- Returns whether it went out. Writing in a thread
+--- - that has a proposal asks for another one: a decision marked and not sent
+---   is cleared (one that was sent stands: the agent is applying it);
+--- - that is closed (declined or done) continues it: it is open again, and
+---   its old decision is no longer the state of affairs.
 function M.reply(t, step, th, text)
   text = vim.trim(text or '')
   if text == '' then
     return false
   end
-  if finished(th) then
-    error(('thread %s is closed (%s); ask a new question on these lines'):format(th.id, th.state), 0)
-  end
+  local decision, sent = tour.thread_decision(th)
+  local closed = finished(th)
   table.insert(th.messages, { by = 'user', text = text })
-  -- A decision the agent was not told yet stays what the thread is about.
-  if not (th.state == 'accepted' and not th.decision_sent) then
-    th.state = 'draft'
+  if closed or (decision and not sent) then
+    th.decision, th.decision_sent = nil, nil
+  elseif decision then
+    -- A thread stored before decisions were collected has it as its state only.
+    th.decision, th.decision_sent = decision, true
   end
+  th.state = 'draft'
   if th.kind == 'question' and not t.plan then
     return deliver_now({ thread_item(t, step_index(t, step), step, th) }, 'question ' .. th.id)
   end
@@ -585,8 +627,30 @@ local function lines_of(buf, range)
   return math.max(1, math.min(from, to, last)), math.max(1, math.min(math.max(from, to), last))
 end
 
--- Write on the lines of the current buffer: a reply in the open thread
--- there, else a new thread of `kind`. The buffer is any file, in or out of a
+local function id_number(th)
+  return tonumber(tostring(th.id):match('^t(%d+)$')) or 0
+end
+
+-- The thread that writing on `from`..`to` goes into, with its entry: an open
+-- thread of the entries on those lines, else the newest closed one (declined
+-- or done), which writing continues. Nil when there is none.
+local function thread_for(entries, from, to)
+  local closed, closed_e
+  for _, e in ipairs(entries) do
+    for _, th in ipairs(threads_at(e.step, from, to)) do
+      if not finished(th) then
+        return e, th
+      end
+      if not closed or id_number(th) > id_number(closed) then
+        closed, closed_e = th, e
+      end
+    end
+  end
+  return closed_e, closed
+end
+
+-- Write on the lines of the current buffer: a reply in the thread there (an
+-- open one, else a closed one, which is continued), else a new thread of `kind`. The buffer is any file, in or out of a
 -- repository, in any window; nothing is switched. Without `text` the user is
 -- asked; an empty answer cancels.
 local function write(kind, text, range)
@@ -637,16 +701,12 @@ local function write(kind, text, range)
     for _, e in ipairs(entries) do
       pcall(tour.sync, e.step)
     end
-    for _, e in ipairs(entries) do
-      for _, th in ipairs(threads_at(e.step, from, to)) do
-        if not finished(th) then
-          return M.reply(e.t, e.step, th, answer)
-        end
-      end
+    local e, th = thread_for(entries, from, to)
+    if th then
+      return M.reply(e.t, e.step, th, answer)
     end
     -- The entry the cursor is in, else the first of the file; a file no tour
     -- lists gets an entry in `Other files`.
-    local e
     for _, x in ipairs(picked and entries or {}) do
       e = e or (x.step == picked.step and x or nil)
     end
@@ -672,22 +732,22 @@ local function write(kind, text, range)
   if text and vim.trim(text) ~= '' then
     return add(text)
   end
-  local open
-  for _, e in ipairs(tours.entries(file)) do
-    for _, th in ipairs(threads_at(e.step, from, to)) do
-      if not finished(th) then
-        open = open or th
-      end
-    end
+  local _, open = thread_for(tours.entries(file), from, to)
+  local title, prompt
+  if open then
+    title = ('Reply in %s'):format(open.id)
+    prompt = ('%s on line %s: '):format(title, where(from, to))
+  else
+    local what = kind == 'question' and 'Question' or 'Change request'
+    title = ('%s on %s:%s'):format(what, vim.fn.fnamemodify(file, ':~:.'), where(from, to))
+    prompt = ('Your %s on line %s: '):format(kind == 'question' and 'question' or 'change request', where(from, to))
   end
-  local what = open and ('Reply in %s'):format(open.id)
-    or (kind == 'question' and 'Your question' or 'Your change request')
-  vim.ui.input({ prompt = ('%s on line %s: '):format(what, where(from, to)) }, ui.safe(add))
+  input.ask({ title = title, prompt = prompt }, add)
 end
 
 --- Ask a question about the code: on `range` ({ from, to }), the selection
---- or the cursor line. It is sent at once. If the lines carry an open thread
---- of the user, the text is a reply in it, whatever its kind.
+--- or the cursor line. It is sent at once. If the lines carry a thread of the
+--- user, the text is a reply in it, whatever its kind (see M.reply).
 function M.ask(text, range)
   return write('question', text, range)
 end
@@ -743,52 +803,57 @@ end
 
 -- Decisions -----------------------------------------------------------------------
 
--- A proposal to decide on: waiting for the user, or decided and not told yet.
-local function decidable(th)
-  return th.state == 'proposed' or ((th.state == 'accepted' or th.state == 'declined') and not th.decision_sent)
-end
-
---- Decide on what `target` (see `here`) holds: the proposal of a thread
---- becomes accepted or declined, a note gets the decision. Both are sent at
---- once. `kind` is 'accept', 'reject', or nil to take the decision back
---- (while the agent has not been told).
+--- Decide on what `target` (see `here`) holds. Nothing is sent: the decision
+--- is marked, and `send` delivers it with the other items. Until then it can
+--- be changed (the other key) or taken back (`kind` nil). The proposal of a
+--- thread stays `proposed` until `send` makes it accepted or declined; a note
+--- carries the decision itself. After `send` the decision stands: to go on,
+--- the user writes on the line, which continues the thread.
 function M.decide_on(target, kind)
   local t, th, note = target.t, target.thread, target.note
   if t.plan then
     return notify('a plan has no proposals to decide: say it in the feedback', vim.log.levels.WARN)
   end
-  if th and decidable(th) then
+  if th and th.state == 'proposed' then
     if kind == nil then
-      if th.state == 'proposed' then
+      if not th.decision then
         return notify('thread ' .. th.id .. ': nothing to take back')
       end
-      th.state = 'proposed'
-      th.decision_sent = nil
+      th.decision, th.decision_sent = nil, nil
       changed(t.root)
       return notify('thread ' .. th.id .. ': decision cleared')
     end
-    th.state = kind == 'accept' and 'accepted' or 'declined'
-    th.decision_sent = nil
+    th.decision, th.decision_sent = kind, nil
     changed(t.root)
-    return deliver_now({ decision_item(t, target.si, target.step, th) },
-      ('decision on %s (%s)'):format(th.id, th.state))
+    return notify(('thread %s: %s, not sent; send delivers it'):format(
+      th.id, kind == 'accept' and 'accepted' or 'declined'))
+  end
+  if th and not note and tour.thread_decision(th) and not tour.unsent_decision(th) then
+    return notify(('thread %s: the decision was sent; write on the line to continue the thread'):format(th.id),
+      vim.log.levels.WARN)
   end
   if note then
-    note.decision = kind
-    note.decision_sent = nil
+    if note.decision and note.decision_sent then
+      return notify(('finding [%d]: the decision was sent; write on the line to go on'):format(note.n),
+        vim.log.levels.WARN)
+    end
+    if not kind and not note.decision then
+      return notify(('finding [%d]: nothing to take back'):format(note.n))
+    end
+    note.decision, note.decision_sent = kind, nil
     changed(t.root)
     if not kind then
       return notify(('finding [%d]: decision cleared'):format(note.n))
     end
-    return deliver_now({ decision_item(t, target.si, target.step, note) },
-      ('decision on finding [%d] (%s)'):format(note.n, kind == 'accept' and 'accepted' or 'rejected'))
+    return notify(('finding [%d]: %s, not sent; send delivers it'):format(
+      note.n, kind == 'accept' and 'accepted' or 'rejected'))
   end
   notify('nothing to decide here')
 end
 
 --- The user's stance on what is under the cursor: 'accept', 'reject', or
 --- nil / 'clear' to take it back. A proposal in a thread and a finding (note)
---- can be decided; the decision is sent at once.
+--- can be decided; the decision is delivered by `send`.
 function M.decide(kind)
   if kind == 'clear' then
     kind = nil

@@ -17,6 +17,7 @@
 --   send.lua   handing a message to the agent (senders)
 --   feedback.lua  threads, decisions, send/inbox, explain
 --   thread.lua    a thread or note in full, in a float
+--   input.lua     where text is typed: a centered float (or vim.ui.input)
 --   drawer.lua    threads in every buffer the code window's draw does not cover
 --   reject.lua    discarding a group's unstaged changes
 --   base.lua      the base version of the file in a float
@@ -57,7 +58,7 @@ local M = {}
 local senders = { auto = true, claudecode = true, terminal = true, clipboard = true }
 
 --- Optional: setup({ panel_side, panel_width, panel_min_width, code_min_ratio,
---- max_removed_lines, view, sender, submit, terminal_pattern, state_dir, keys })
+--- max_removed_lines, view, sender, submit, input, terminal_pattern, state_dir, keys })
 --- `keys`: true maps the default keys under <leader>w, a string uses that
 --- prefix, false (default) maps nothing.
 function M.setup(opts)
@@ -76,6 +77,9 @@ function M.setup(opts)
   end
   if opts.submit ~= nil and type(opts.submit) ~= 'boolean' then
     error('walkthrough: submit must be true or false')
+  end
+  if opts.input ~= nil and opts.input ~= 'float' and opts.input ~= 'ui' then
+    error('walkthrough: input must be "float" or "ui"')
   end
   st.config = vim.tbl_extend('force', st.config, opts)
   -- `keys` is true (prefix <leader>w), a prefix string, or false.
@@ -139,16 +143,45 @@ M.load = socket(function(path)
     end
     local root = store.root_of(t.steps[1].file)
     store.merge_saved(root)
+    -- A commit that is loaded already is replaced, and the user stays where
+    -- they are in it, unless the agent says where to start.
+    local pos = t.start
+    local _, loaded = tours.find(t.group)
+    if t.group ~= nil and loaded and data.start == nil then
+      pos = math.max(1, math.min(loaded.pos or 1, #t.steps))
+    end
     -- A tour of a group that is loaded already replaces it.
-    local new = { group = t.group, steps = t.steps, pos = t.start, root = root }
-    tours.put(new)
-    local ok, e = pcall(ui.render, new.steps[new.pos], new.pos)
-    if not ok then
-      fail(e)
+    local new = { group = t.group, steps = t.steps, pos = pos, root = root }
+    local _, shown = tours.put(new)
+    if shown then
+      local ok, e = pcall(ui.render, new.steps[new.pos], new.pos)
+      if not ok then
+        fail(e)
+      end
+    else
+      -- Nothing renders it now, so a base that does not exist is found here.
+      for _, step in ipairs(new.steps) do
+        if type(step.diff) == 'string' then
+          local ok, e = pcall(git.check_ref, step.file, step.diff)
+          if not ok then
+            fail(e)
+          end
+        end
+      end
     end
     -- What was written on files of this map before it came is theirs now.
     if tours.absorb_extra(new) then
       ui.update()
+    end
+    if not shown then
+      -- The first commit of a map is the current one: this one is listed, and
+      -- the view stays as it is.
+      ui.update_map()
+      ui.refresh_progress()
+      local current = tours.active()
+      vim.notify(('walkthrough: commit "%s" %s the map; %s stays on screen'):format(
+        new.group, loaded and 'updated in' or 'added to', current and tours.name(current) or 'the commit on screen'),
+        vim.log.levels.INFO)
     end
     -- The map that was asked for has arrived.
     request.clear(root)

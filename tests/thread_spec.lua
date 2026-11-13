@@ -195,7 +195,7 @@ panel = vim.api.nvim_buf_get_lines(st.panel_buf, 0, -1, false)
 check('map: and it follows send', panel[#panel] == '1 waiting', vim.inspect(panel))
 send('patch', { thread = 't4', done = true })
 check('map: no line when there is nothing to count', H.panel_text() == base_panel, H.panel_text())
-at(9)
+at(16)
 w.change('c3')
 at(11)
 w.change('c4')
@@ -264,16 +264,31 @@ press('q')
 vim.api.nvim_feedkeys(vim.keycode('<Plug>(walkthrough-thread)'), 'x', false)
 check('<Plug>(walkthrough-thread) opens it', thread.win() ~= nil)
 
--- Keys: accept and decline
+-- Keys: accept, decline and take back. Nothing is sent until send.
 sent = {}
 press('y')
-check('float key y: accepts the proposal, sent at once, float shows the new state', th('t1').state == 'accepted' and #sent == 1
-  and float_text():match('^t1 · change · a%.txt:10%-12 · accepted') ~= nil, float_text())
+check('float key y: marks the acceptance, nothing is sent, the float says so', th('t1').decision == 'accept' and th('t1').state == 'proposed'
+  and #sent == 0 and float_text():match('^t1 · change · a%.txt:10%-12 · %(accepted, not sent%)') ~= nil, float_text())
+press('d')
+check('float key d: switches it to declined', th('t1').decision == 'reject' and #sent == 0
+  and float_text():match('^t1 · change · a%.txt:10%-12 · %(declined, not sent%)') ~= nil, float_text())
+press('u')
+check('float key u: takes the decision back', th('t1').decision == nil and th('t1').state == 'proposed'
+  and float_text():match('^t1 · change · a%.txt:10%-12 · proposed') ~= nil, float_text())
+press('y')
 press('q')
+w.send()
+check('float: send delivers the acceptance', th('t1').state == 'accepted' and #sent == 1 and sent[1].text:match('the user accepted it'))
 at(10)
 w.thread()
+reset_log()
 press('d')
-check('float key d: an accepted proposal that was told cannot be changed', th('t1').state == 'accepted' and #sent == 1 and find('nothing to decide here') ~= nil)
+check('float key d: after send the decision cannot be changed', th('t1').state == 'accepted' and #sent == 1
+  and find('write on the line to continue the thread') ~= nil and find('write on the line').level == vim.log.levels.WARN)
+reset_log()
+press('u')
+check('float key u: ... nor taken back', th('t1').state == 'accepted' and find('write on the line to continue the thread') ~= nil)
+check('float: ... and it reads accepted', float_text():match('^t1 · change · a%.txt:10%-12 · accepted') ~= nil, float_text())
 press('q')
 
 open()
@@ -285,8 +300,14 @@ at(10)
 w.thread()
 sent = {}
 press('d')
-check('float key d: declines, sent at once', th('t1').state == 'declined' and #sent == 1 and sent[1].text:match('declined it')
-  and float_text():match('declined') ~= nil, float_text())
+check('float key d: marks the decline, nothing is sent', th('t1').decision == 'reject' and th('t1').state == 'proposed' and #sent == 0
+  and float_text():match('%(declined, not sent%)') ~= nil, float_text())
+press('q')
+w.send()
+check('float: send delivers the decline', th('t1').state == 'declined' and #sent == 1 and sent[1].text:match('declined it'))
+at(10)
+w.thread()
+check('float: ... and it reads declined', float_text():match(' · declined') ~= nil, float_text())
 press('q')
 
 -- Keys: reply
@@ -322,14 +343,16 @@ reset_log()
 press('r')
 check('float key r: a note has no thread to reply in', find('no thread to reply in') ~= nil)
 press('q')
--- A closed thread takes no reply.
+-- A closed thread is continued by a reply.
 send('patch', { thread = 't2', done = true })
 at(9)
 w.thread()
-answer = 'too late'
-reset_log()
+answer = 'one more thing'
+sent = {}
 press('r')
-check('float key r: a closed thread refuses a reply', #th('t2').messages == 2 and find('is closed') ~= nil)
+check('float key r: a closed thread is continued: open again, the message not sent', #th('t2').messages == 3
+  and th('t2').messages[3].text == 'one more thing' and th('t2').state == 'draft' and #sent == 0
+  and float_text():match('You: one more thing') ~= nil and float_text():match(' · draft') ~= nil, float_text())
 press('q')
 
 -- Keys: simpler and deeper
@@ -376,10 +399,13 @@ check('float: a finding, in full', text:match('^Finding %[1%] · a%.txt:6') and 
   and text:match('Decision: none') and text:match('\nsix\n') and text:match('Detail:\nwhy six\nbecause'), text)
 sent = {}
 press('y')
-check('float key y: accepts the finding, sent at once, shown in the float', st.history[1].notes[1].decision == 'accept' and #sent == 1
-  and float_text():match('Decision: accepted') ~= nil, float_text())
+check('float key y: marks the finding, nothing is sent, the float says so', st.history[1].notes[1].decision == 'accept' and #sent == 0
+  and float_text():match('Decision: accepted %(not sent%)') ~= nil, float_text())
 press('d')
-check('float key d: declines it', st.history[1].notes[1].decision == 'reject' and float_text():match('Decision: rejected') ~= nil)
+check('float key d: switches it to rejected', st.history[1].notes[1].decision == 'reject' and #sent == 0
+  and float_text():match('Decision: rejected %(not sent%)') ~= nil, float_text())
+press('u')
+check('float key u: takes it back', st.history[1].notes[1].decision == nil and float_text():match('Decision: none') ~= nil, float_text())
 reset_log()
 press('X')
 check('float key X: a note cannot be deleted', #st.history[1].notes == 2 and #confirms == 0 and thread.win() ~= nil)

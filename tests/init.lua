@@ -18,6 +18,9 @@ end
 -- the compact view: tests/compact_spec.lua (and a few checks of other specs)
 -- switch it on.
 require('walkthrough.state').config.view = 'file'
+-- The specs answer prompts by replacing vim.ui.input; the float that is the
+-- default has its own spec (tests/input_spec.lua).
+require('walkthrough.state').config.input = 'ui'
 
 -- Review state (:Walkthrough resume) goes where tests/run.sh says, never to
 -- the user's real state directory.

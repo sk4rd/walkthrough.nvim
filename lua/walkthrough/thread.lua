@@ -1,12 +1,14 @@
 -- A thread or a note in full, in a centered float: the code it is about and
 -- every message, as plain text. The keys act on what the float shows:
--- reply, accept, decline, simpler, deeper, delete (threads only), close.
+-- reply (also in a closed thread, which it continues), accept, decline, undo
+-- the decision, simpler, deeper, delete (threads only), close.
 -- The float draws itself again when its thread changes while it is open (a
 -- patch arrives, a reply is added); ui.update tells it.
 local st = require('walkthrough.state')
 local tour = require('walkthrough.tour')
 local ui = require('walkthrough.ui')
 local feedback = require('walkthrough.feedback')
+local input = require('walkthrough.input')
 
 local M = {}
 
@@ -60,7 +62,9 @@ function M.lines(target)
     end
   end
   if th then
-    table.insert(out, ('%s · %s · %s:%s · %s'):format(th.id, th.kind, short(step), where(th.from, th.to), th.state))
+    -- A decision that was not sent says so; otherwise the state is the word.
+    local state = tour.unsent_decision(th) and ('(' .. ui.thread_label(th) .. ')') or th.state
+    table.insert(out, ('%s · %s · %s:%s · %s'):format(th.id, th.kind, short(step), where(th.from, th.to), state))
     table.insert(out, '')
     local code = vim.fn.filereadable(step.file) == 1 and vim.fn.readfile(step.file) or {}
     local shown = 0
@@ -82,7 +86,7 @@ function M.lines(target)
     table.insert(out, 'Verdict: ' .. (note.verdict or '-'))
     table.insert(out, 'Evidence: ' .. (note.evidence or '-'))
     table.insert(out, 'Decision: ' .. (note.decision == 'accept' and 'accepted' or note.decision == 'reject' and 'rejected'
-      or 'none'))
+      or 'none') .. ((note.decision and not note.decision_sent) and ' (not sent)' or ''))
     if note.text then
       table.insert(out, '')
       vim.list_extend(out, tour.to_lines(note.text))
@@ -163,14 +167,14 @@ local function map_keys(buf)
     if not th then
       return vim.notify('walkthrough: a note has no thread to reply in; ask on its line', vim.log.levels.INFO)
     end
-    vim.ui.input({ prompt = ('Reply in %s: '):format(th.id) }, function(answer)
-      ui.safe(function()
-        local t = resolve()
-        if t and t.thread then
-          feedback.reply(t.t, t.step, t.thread, answer)
-          M.refresh()
-        end
-      end)()
+    -- The float is not the place for the text: it opens its own, and the
+    -- thread float stays where it is behind it.
+    input.ask({ title = ('Reply in %s'):format(th.id), prompt = ('Reply in %s: '):format(th.id) }, function(answer)
+      local t = resolve()
+      if t and t.thread then
+        feedback.reply(t.t, t.step, t.thread, answer)
+        M.refresh()
+      end
     end)
   end))
   map({ 'y' }, 'accept', act(function(target)
@@ -178,6 +182,9 @@ local function map_keys(buf)
   end))
   map({ 'd' }, 'decline', act(function(target)
     feedback.decide_on(target, 'reject')
+  end))
+  map({ 'u' }, 'take the decision back', act(function(target)
+    feedback.decide_on(target, nil)
   end))
   map({ '-' }, 'explain simpler', act(function(target)
     feedback.explain_on(target, 'simpler')

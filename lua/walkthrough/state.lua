@@ -86,6 +86,9 @@ st.config = vim.tbl_extend('keep', st.config or {}, {
   -- A message is delivered so that the agent starts on it (typed and submitted,
   -- focus stays where it is). false: typed, not sent, and the focus moves.
   submit = true,
+  -- Where text is typed (a question, a change request, a reply, plan feedback):
+  -- 'float' (a centered window) or 'ui' (`vim.ui.input`, for your own input UI).
+  input = 'float',
   -- Lua patterns, matched case-insensitively against the name and title of a
   -- terminal buffer; or fun(name, title, buf) -> boolean.
   terminal_pattern = { 'claude', 'codex', 'opencode', 'gemini', 'aider', '%f[%w]amp%f[%W]' },

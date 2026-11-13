@@ -118,9 +118,12 @@ A. Review a finished change                           *walkthrough-scenario-a*
   4. Annotate, in either view. `Pa` asks a question: it is sent at once and the
      answer appears under the line. `Pc` writes a change request: it is
      collected, `Pm` sends all of them, and the agent replies to each with a
-     proposal. `Py` accepts a proposal or finding, `Pd` declines it. `P-` and
-     `P+` ask for a simpler or a deeper answer. `Pt` opens a long thread in
-     full.
+     proposal. `Py` accepts a proposal or finding, `Pd` declines it: the
+     decision is collected like a change request, you can still change it, and
+     `Pm` sends it with the rest (|walkthrough-findings|). `P-` and `P+` ask
+     for a simpler or a deeper answer. `Pt` opens a long thread in full. The
+     text of a question, a change request or a reply is typed in a small
+     centered window (|walkthrough-input|).
   5. Stage a commit with `Ps` (this file) or `PS` (every file). Exactly the
      commit's lines are staged, also in a file that holds lines of other
      commits (|walkthrough-stage|).
@@ -151,7 +154,7 @@ only part specific to it (|walkthrough-plan|).
 3. SETUP OPTIONS                                           *walkthrough-setup*
 
 setup({opts}) is optional. It raises an error for an invalid `panel_side`,
-`code_min_ratio`, `view`, `sender` or `submit`. Options survive loading the
+`code_min_ratio`, `view`, `sender`, `submit` or `input`. Options survive loading the
 module again.
 
 >lua
@@ -185,6 +188,10 @@ module again.
                      starts on it, and the focus stays where it is. false: it
                      is typed or pasted but not submitted, and the focus moves
                      to the agent. See |walkthrough-senders|.
+  `input`            "float" (default) or "ui": where the text of a question, a
+                     change request, a reply and plan feedback is typed. "float"
+                     opens a centered window (|walkthrough-input|). "ui" calls
+                     `vim.ui.input`, for those who have their own input UI.
   `terminal_pattern` Which terminal buffer is the agent, for the "terminal"
                      sender. A list of Lua patterns, one pattern, or a
                      function. See |walkthrough-senders|. Default: "claude",
@@ -242,20 +249,22 @@ Write
                               works on any saved file, in any window, with or
                               without a review (|walkthrough-other|). A thread
                               starts and the question is sent at once. If the
-                              lines carry a thread of yours that is not done
-                              or declined, the text is a reply in it,
-                              whatever its kind. A finding on the line is sent
-                              along. Without text it asks for it. If nothing
-                              can be sent, the thread stays a draft and goes
-                              out with `send`.
+                              lines carry a thread of yours, the text is a
+                              reply in it, whatever its kind. A thread that is
+                              `declined` or `done` is continued (see
+                              |walkthrough-threads|). A finding on the line is
+                              sent along. Without text it asks for it
+                              (|walkthrough-input|). If nothing can be sent,
+                              the thread stays a draft and goes out with
+                              `send`.
   `:Walkthrough change [text]`
                               the same for a change request: the thread is
                               collected, nothing is sent until `send`. The
                               agent answers with a proposal.
   `:Walkthrough send`         send everything not delivered yet, in all
                               commits of the repository, as one message:
-                              change requests, collected replies, and
-                              decisions that could not be sent.
+                              change requests, collected replies and your
+                              decisions on proposals and findings.
   `:Walkthrough thread`       open the thread or finding on this line in full,
                               in a float (|walkthrough-thread|).
   `:Walkthrough thread-delete`
@@ -272,8 +281,10 @@ Decide
                               on what is under the cursor, in the code or in
                               the thread float: the proposal of a thread
                               (state "proposed") or the verdict of a finding.
-                              It is sent at once; "clear" takes back a
-                              decision the agent has not been told.
+                              It only marks the decision: `send` delivers it.
+                              Until then the other value changes it and
+                              "clear" takes it back. After `send` both are
+                              refused.
 
 Approve
   `:Walkthrough stage`        stage the lines of the current commit in the
@@ -432,14 +443,18 @@ keys are free):
 *walkthrough-thread*
 `:Walkthrough thread` (`Pt`) opens the thread or finding on the cursor line in
 a centered float, as plain text: a heading (`t1 · question · path:10-12 ·
-state`), the code lines (12 at most), then every message with `You:` or
+state`; for a decision that is not sent: `(accepted, not sent)` or `(declined,
+not sent)` in place of the state), the code lines (12 at most), then every message with `You:` or
 `Agent:` (a proposal is marked `Agent (proposal):`). For a finding: its number,
-verdict, evidence, decision, text and `detail`. The float draws itself again
+verdict, evidence, decision (with `(not sent)` while it is not), text and
+`detail`. The float draws itself again
 when its thread changes while it is open. Its keys:
 
   r         reply (asks for the text; a question is sent at once, a change
-            request is collected)
-  y  d      accept / decline the proposal or finding
+            request is collected). In a thread with a proposal it asks for
+            another one; in a declined or done thread it continues the thread.
+  y  d      accept / decline the proposal or finding (marked, not sent)
+  u         take the decision back (while it is not sent)
   -  + =    simpler / deeper
   X         delete the thread, after asking (the default answer cancels).
             Findings cannot be deleted.
@@ -559,19 +574,37 @@ Kinds:
   `change`     your change request. Collected while you read; `send` delivers
                all of them. The agent replies with a proposal.
 
-Writing again on lines that carry an open thread of yours replies in that
-thread, whatever its kind. A closed thread (`done` or `declined`) takes no
-reply: ask a new question on those lines.
+Writing again on lines that carry a thread of yours adds your message to that
+thread, whatever its kind and whichever key you use (`Pa`, `Pc`, or `r` in the
+thread float):
+
+  - In a thread with a proposal it asks for another proposal. A decision you
+    marked on it and did not send is cleared. `send` tells the agent to revise
+    its proposal: to reply with a new proposal (`answer` with `proposal`) and
+    not to edit code. A decision that was sent stands: the agent is applying
+    it, and your message goes to it.
+  - A thread that is `declined` or `done` is continued, not replaced: it is
+    open again and the message is not sent yet. For a change request the agent
+    is asked for a proposal, for a question to answer. With several closed
+    threads on the lines, the newest is continued; an open one comes first.
 
 States, and the label drawn after the id:
   `draft`      written, not delivered: a change request waiting for `send`, or
                a question that could not be sent. Label "(not sent)".
   `waiting`    delivered, no answer yet. Label "(waiting)".
   `answered`   the agent answered. No label.
-  `proposed`   the agent answered with a proposal. Label "(proposal)".
-  `accepted`   you accepted the proposal. Label "(accepted)".
-  `declined`   you declined it. Label "(declined)". Closed.
-  `done`       the agent reported the work. Label "(done)". Closed.
+  `proposed`   the agent answered with a proposal. Label "(proposal)". A new
+               proposal puts a thread back here and clears the old decision.
+  `accepted`   you accepted the proposal and `send` told the agent. Label
+               "(accepted)".
+  `declined`   you declined it and `send` told the agent. Label "(declined)".
+               Dimmed.
+  `done`       the agent reported the work. Label "(done)". Dimmed.
+
+A decision you marked and `send` did not deliver yet is not a state: the
+thread is still `proposed`, and the label is "(accepted, not sent)" or
+"(declined, not sent)". It counts as "not sent" in the last line of the map
+and in `status()` (`threads.draft`).
 
 The look under the line (the same in the compact view and the file view):
 
@@ -581,12 +614,35 @@ The look under the line (the same in the compact view and the file view):
 <
 
 The last message of the agent follows with `↳`. Done and declined threads are
-dimmed. A thread is shortened to 6 lines; a longer one ends with `… full
+dimmed. A text of several lines is wrapped line by line. A thread is shortened to 6 lines; a longer one ends with `… full
 thread: {key}`, and `Pt` opens it. `(code changed)` after the text means the
 code on those lines was rewritten after the thread was started.
 
 `:Walkthrough thread-delete` (`PX`) deletes the thread under the cursor. Threads
 of a change are deleted after its commit.
+
+*walkthrough-input*
+The text of a question, a change request, a reply and plan feedback is typed
+in a small floating window in the middle of the screen, not on the command
+line. The title says what is written and where: `Question on backup.sh:7`,
+`Change request on backup.sh:7-9`, `Reply in t2`, `Plan feedback`. The footer
+names the keys. The window has a scratch buffer of the file type
+`walkthrough_input` (so completion plugins can be switched off for it), and it
+opens in Insert mode.
+
+  <CR>            send the text (Insert and Normal mode)
+  <C-j>           a new line (Insert mode): a text may have several lines
+  <Esc>           in Insert mode it leaves Insert mode; in Normal mode it
+                  cancels
+  q               cancel (Normal mode)
+
+An empty text cancels. Closing the window in any other way cancels. Afterwards
+the cursor is in the window and at the position it came from, in the mode it
+had before. The window is about 70 columns wide or 60 % of the screen,
+whichever is smaller; long lines wrap, and the window grows with the text up
+to 10 lines. A text of several lines is stored and sent as written; under the
+code it is wrapped line by line. With `input = "ui"` (|walkthrough-setup|) the
+prompt is `vim.ui.input` instead and none of this applies.
 
 ==============================================================================
 9. FINDINGS AND DECISIONS                               *walkthrough-findings*
@@ -611,14 +667,26 @@ Evidence values (how the agent knows):
   `opinion`   a judgement.
 
 You decide on a finding, or on a proposal in a thread, with `Py` (accept) and
-`Pd` (decline). `P0` takes a decision back while the agent has not been told.
-The decision is sent at once. What the agent does with it:
+`Pd` (decline). A decision is collected, like a change request: nothing is
+sent. The label under the code says `(accepted, not sent)` or `(declined, not
+sent)`, and a finding's badge says `✓ accepted, not sent` or `✗ rejected, not
+sent`. Until you send it, the other key changes the decision and `P0` takes it
+back (a proposal is then "(proposal)" again, a finding has no decision).
+
+`Pm` (`send`) delivers the decisions together with the change requests and
+replies, in one message; `inbox` lists them. Only then is a thread `accepted`
+or `declined`. A decision that was sent cannot be changed or taken back: the
+notification says to write on the line, which continues the thread
+(|walkthrough-threads|). What the agent does with a decision:
 
   - an accepted proposal: it applies it, then reports in the thread with
     `answer` and `done`;
   - an accepted `simplify` or `remove` finding: it applies it and patches the
     finding to `done`;
   - a declined proposal or a rejected finding: it leaves the code as it is.
+
+The agent cannot set a decision or a state other than by `answer`, `proposal`,
+`replace` and `done` in a thread patch.
 
 Decisions use the values `accept` and `reject`; the levels of `explain` are
 `simpler` and `deeper`.
@@ -999,9 +1067,22 @@ Commit fields
 
 Sending a commit with the `group` of a loaded one replaces it and keeps what
 you did (seen entries and threads of entries with the same `file` and `title`,
-depth, view, a stored commit message). A commit
+depth, view, a stored commit message). Where you are stays too: the replaced
+commit stays the one on screen if it was, at the same entry, unless `start`
+says otherwise; if it was not on screen, nothing on screen changes. A commit
 with a `group` replaces the local review of its repository and takes its
 threads over by file; the request for the map ends (|walkthrough-request|).
+
+Which commit is current. The first commit of a map is the current one: it is
+shown, replacing the local review if there was one. A later commit of the same
+repository is added to the map without switching, and a notification names it
+(`commit "B" added to the map; A stays on screen`). The code window, the
+compact view and the cursor do not move. You go to it with `P]`, `:Walkthrough
+group` or `<CR>` in the map. A commit of another repository does not touch the
+commits of this one. Commits that came back from the saved state without
+being shown do not count as open: a commit that arrives then is shown. A
+commit whose `diff` names a ref that does not exist is refused as it arrives,
+whether it is shown or not.
 
 Entry fields (all optional except `file`)
 
@@ -1198,9 +1279,13 @@ in entry order, threads sorted by line. The item kinds (`kind`):
               it. It has no `group`.
 
 What is expected: a `question` gets a thread patch with `answer`. A `change`
-gets a proposal (`answer` with `proposal`) and no edit of the code. An accepted
-proposal is applied, then reported with `answer` and `done`; a declined one is
-left alone. An accepted `simplify` or `remove` finding is applied and patched
+gets a proposal (`answer` with `proposal`) and no edit of the code. When you
+wrote in a thread that has a proposal, the item asks the agent to revise its
+proposal: a new `answer` with `proposal`, and no edit (the text message says
+so in `Expected:`; in the inbox the message before `new` is the proposal). A thread you continued
+after it was declined or done is a `question` or `change` item like any other.
+An accepted proposal is applied, then reported with `answer` and `done`; a
+declined one is left alone. An accepted `simplify` or `remove` finding is applied and patched
 to `done`; a rejected decision is left alone. A `commit` gets the message. A
 `map` gets the commits of the map.
 
@@ -1252,7 +1337,9 @@ return "ok", a JSON string, a commit id, or "error: <one short line>".
 
   load({path})        show a commit of the map or an entry from a JSON file
                       (|walkthrough-format|). A commit with the `group` of a
-                      loaded one replaces it and keeps what you did.
+                      loaded one replaces it and keeps what you did. A later
+                      commit of a map does not switch the view: the first one
+                      is the current one.
   patch({path})       change what is loaded in place (|walkthrough-patch|)
   status()            JSON: where you are (|walkthrough-status|)
   inbox({all})        JSON: what you wrote for the agent, in all commits of
@@ -1286,7 +1373,8 @@ notification (|vim.notify()|).
                       of the file in the current window
   map()               show the map panel, or hide it
   ask({text}, {range})
-                      ask a question, sent at once; {range} is `{ from, to }`
+                      ask a question, sent at once; {range} is `{ from, to }`.
+                      Without {text} it is typed in the input window
   ask_line()          the old name of ask()
   change({text}, {range})
                       write a change request, collected until send()
@@ -1294,7 +1382,8 @@ notification (|vim.notify()|).
   thread_delete()     delete the thread here
   send()              send what was not delivered yet (all commits of the
                       repository)
-  decide({x})         "accept", "reject" or "clear"
+  decide({x})         "accept", "reject" or "clear": marks, changes or takes
+                      back a decision; send() delivers it
   explain({x})        "simpler" or "deeper"
   stage_group({opts}) stage the commit; `{ all = true }` in every file
   reject_group()      discard the commit's unstaged lines
@@ -1343,7 +1432,8 @@ loading the module again.
   number badge                    the finding's number
   KEEP SIMPLIFY REMOVE DONE MOVED the finding's verdict (|walkthrough-verdicts|)
   ran / read / opinion            the finding's `evidence`
-  "✓ accepted" / "✗ rejected"     your decision on the verdict
+  "✓ accepted" / "✗ rejected"     your decision on the verdict; ", not sent"
+                                  after it until `send` delivers it
   "(code changed)"                the line of the finding was rewritten or
                                   deleted after it was written
   "» t1 (label) you: text"        your thread, under its last line, with the

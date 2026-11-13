@@ -362,6 +362,17 @@ function M.diff_lines(old, new, ctxlen)
   return parsed.f and parsed.f.hunks or {}
 end
 
+--- Raise `git diff failed: ...` when `ref` names nothing in the repository of
+--- `file`: what showing a step against that ref would raise. For a commit
+--- that is loaded without being shown, which must fail now and not when the
+--- user gets to it.
+function M.check_ref(file, ref)
+  local dir = vim.fs.dirname(vim.fn.fnamemodify(file, ':p'))
+  if M.run(dir, { 'rev-parse', '--verify', '--quiet', ref .. '^{commit}' }).code ~= 0 then
+    error('git diff failed: unknown revision ' .. ref, 0)
+  end
+end
+
 --- Hunks of an untracked `file` against `ref`. `git diff <ref> -- <file>`
 --- cannot be used: a file that is not in the index counts as deleted, so it
 --- prints the whole ref version as removed lines. A file that exists in the

@@ -34,7 +34,7 @@ its `Expected:` lines say. If the user only says they sent something, read
 | Kind | Do | Reply (`tour.sh --patch -`) |
 |---|---|---|
 | `question` | answer at the user's level, short. Never change code for a question | `{ "thread": "t1", "answer": "..." }` |
-| `change` (change request) | reply with a **proposal** and wait. Edit nothing | `{ "thread": "t1", "answer": "<what you would change>", "proposal": true }` |
+| `change` (change request) | reply with a **proposal** and wait. Edit nothing. If `Expected:` says the user asks you to **revise** your proposal, reply with a new one, not an edit | `{ "thread": "t1", "answer": "<what you would change>", "proposal": true }` |
 | `decision` accepted | apply the proposal (or the `simplify` / `remove` finding), then report | `{ "thread": "t1", "answer": "<what you changed>", "done": true }`; for a finding `{ "step": 2, "note": 1, "verdict": "done" }` |
 | `decision` rejected | leave the code as it is | none |
 | simpler / deeper | rewrite your last answer at that level; keep to it afterwards (`depth` in `--status`) | `{ "thread": "t1", "answer": "<new text>", "replace": true }`; for a finding patch its `detail` |
@@ -47,6 +47,13 @@ Co-authored-by line."
 
 A list of patches is applied as a whole: answer several threads in one call.
 
+The user collects change requests, replies and decisions and sends them
+together (`send`, or `--inbox`): one message can hold all three kinds. A
+decision reaches you only then, and it is final: nothing before it means
+accepted. A thread you already closed (declined or done) can come back as a
+`question` or `change` item, with the earlier messages: the user continued it.
+Do what its `Expected:` line says.
+
 ## 3. Building the map
 
 1. Read `git status`, `git diff <base> --stat` and `git diff <base> -U0`
@@ -55,7 +62,9 @@ A list of patches is applied as a whole: answer several threads in one call.
    that nothing depends on a later commit. Several commits may touch the same
    file. Group by intent, not by file. Anything that fits no commit becomes its
    own commit; never drop it.
-3. Send one `tour.sh` call per commit, in order. `group` is the commit's
+3. Send one `tour.sh` call per commit, in order. The first commit you send is
+   the one the user sees; later ones are added to the map without switching
+   their view. Sending a commit again replaces it where the user is. `group` is the commit's
    subject. The entries are its files in reading order, each with a
    one-sentence `title` and `hunks` that assign **every** changed line of
    that file to a commit: its own lines, and the lines of other commits with

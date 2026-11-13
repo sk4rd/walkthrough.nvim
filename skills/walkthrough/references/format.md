@@ -55,9 +55,14 @@ strings (one per line). JSON `null` is dropped when the file is read; use
 | `start` | integer | 1 or more, limited to the number of entries; the entry shown first (default 1) |
 
 Other keys at this level are ignored. Send commits in map order: the map lists
-them in the order they were sent. Sending a commit with the same `group`
-replaces the loaded one in place and keeps what the user did (seen entries
-and threads of entries with the same `file` and `title`, depth). A different `group` is another commit. A file with no
+them in the order they were sent. The first commit of a map is the one the
+user sees (it replaces the local review, if there is one). A later commit of
+the same repository is added to the map without switching: the user's view and
+position do not move, and Neovim only says that the commit was added. Sending a
+commit with the same `group` replaces the loaded one in place and keeps what the
+user did (seen entries and threads of entries with the same `file` and `title`,
+depth) and where they are: the replaced commit stays on screen if it was, at the
+same entry, unless you give `start`. A different `group` is another commit. A file with no
 `steps` is one entry; it is appended to the active commit. A commit with a
 `group` also replaces the user's local review (`:Walkthrough review`, a map
 without a `group` made from git) and takes its threads over, by file. When the
@@ -207,13 +212,21 @@ no map: answer them with a thread patch as usual.
 
 A thread's states are: `draft` (written, not delivered), `waiting` (delivered,
 not answered), `answered`, `proposed` (your proposal awaits the user),
-`accepted` and `declined` (the user's decision on a proposal), `done`.
-`declined` and `done` threads are closed.
+`accepted` and `declined` (the user's decision on a proposal, delivered),
+`done`. `declined` and `done` threads are closed, but the user can continue
+one by writing on its lines: it then comes back as a `question` or `change`
+item with the earlier messages and the new one after `new`.
+
+The user marks decisions and sends them with the change requests and replies
+(`send`), so `--inbox` and a `Walkthrough:` message can hold all kinds at once.
+A decision is never delivered before that. You cannot set a decision or a state
+other than with `answer`, `proposal`, `replace` and `done`; a new proposal puts
+the thread back to `proposed` and the old decision is void.
 
 | `kind` | Fields | Reply |
 |---|---|---|
 | `question` | `id`, `group`, `step`, `file`, `from`, `to`, `state`, `messages` (list of `by`, `text`, `proposal`), `new` (index of the first message you have not seen), `stale` | `{ "thread": "t1", "answer": "..." }`. Change no code |
-| `change` | the same | a proposal and no edit yet: `{ "thread": "t1", "answer": "...", "proposal": true }` |
+| `change` | the same | a proposal and no edit yet: `{ "thread": "t1", "answer": "...", "proposal": true }`. If the message before `new` is your proposal, the user asks you to revise it: a new proposal, no edit (the text message says so in `Expected:`) |
 | `decision` on a proposal | `id`, `group`, `step`, `file`, `from`, `to`, `decision` (`accept` or `reject`), `state`, `text` | `accept`: apply it, then `{ "thread": "t1", "answer": "<what you changed>", "done": true }`. `reject`: leave the code |
 | `decision` on a finding | `group`, `step`, `note`, `verdict`, `decision`, `file`, `line`, `text` | `accept` of `simplify` or `remove`: apply it, then `{ "step": 2, "note": 1, "verdict": "done" }`. `reject`: leave the code |
 | `commit` | `group`, `stat` (the text of `git diff --cached --stat`) | `{ "commit_message": "...", "group": "..." }`. Listed until a message arrived or the dialog closed; reading does not deliver it |

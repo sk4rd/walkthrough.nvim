@@ -35,8 +35,15 @@ follow your confirmation.
 4. Annotate. `Pa` asks a question; the answer appears under the line.
    `Pc` writes a change request; it is collected, `Pm` sends all of them, and
    the agent replies to each with a proposal. `Py` accepts a proposal or a
-   finding, `Pd` declines it. `P-` and `P+` ask for a simpler or a deeper
-   answer; the level is remembered. `Pt` opens a long thread in full.
+   finding, `Pd` declines it. A decision is collected too: the label says
+   `(accepted, not sent)`, you can change it or take it back with `P0`, and
+   `Pm` sends it together with the change requests. To ask for a different
+   proposal, write on the lines again (`Pa`, `Pc` or `r` in the thread float):
+   your message goes into the same thread. Writing on a declined or done
+   thread continues it. The text is typed in a small centered window: `<CR>`
+   sends, `<C-j>` starts a new line, `<Esc>` in Normal mode or `q` cancels.
+   `P-` and `P+` ask for a simpler or a deeper answer; the level is
+   remembered. `Pt` opens a long thread in full.
 5. `Ps` stages the lines of the current commit in this file, `PS` in every
    file ([`git add`](https://git-scm.com/docs/git-add)), also where a file
    holds lines of other commits. `Px` discards the commit's unstaged lines.
@@ -45,6 +52,10 @@ follow your confirmation.
    [`git commit`](https://git-scm.com/docs/git-commit). A failing check is
    shown but does not block. Then the commit's threads are deleted and the next
    commit is current.
+
+When the agent sends the map as several commits, the first one is the current
+one. A later commit is added to the map without changing the view, and a
+notification names it. Go to it with `P]` or `<CR>` in the map.
 
 ### Ask about existing code
 
@@ -141,6 +152,7 @@ the skill runs `tour.sh --status` itself):
 | `view` | `'compact'` | the view a review opens in: `'compact'` or `'file'` |
 | `sender` | `'auto'` | `'auto'`, `'claudecode'`, `'terminal'`, `'clipboard'` or `function(msg)` |
 | `submit` | `true` | `true`: a message is submitted and the focus stays; `false`: typed only, the focus moves to the agent |
+| `input` | `'float'` | where text is typed: `'float'` (a centered window) or `'ui'` (`vim.ui.input`, for your own input UI) |
 | `terminal_pattern` | `{ 'claude', 'codex', 'opencode', 'gemini', 'aider', 'amp' }` | which terminal buffer is the agent (`amp` matches as a whole word) |
 | `state_dir` | `stdpath('state') .. '/walkthrough'` | where the review is saved |
 | `keys` | `false` | `true` maps the keys below under `<leader>w`; a string is the prefix; `false` maps nothing |
@@ -159,14 +171,16 @@ the prefix.
 | Start | `Pr` review, `PM` request (ask the agent for the map), `PR` resume, `Pq` close |
 | Move | `]w` `[w` next / previous entry, `]n` `[n` next / previous thread or finding, `P]` `P[` next / previous commit, `Pv` switch compact / file view, `Pp` map panel, `Pw` back to the current entry |
 | Write | `Pa` ask (also on a selection), `Pc` change request (also on a selection), `Pm` send, `Pt` open the thread, `PX` delete the thread, `P-` simpler, `P+` `P=` deeper |
-| Decide | `Py` accept, `Pd` decline, `P0` clear |
+| Decide | `Py` accept, `Pd` decline, `P0` clear (all three only mark; `Pm` sends) |
 | Approve | `Ps` stage, `PS` stage all, `Px` reject (discard the commit's unstaged lines), `Pb` base, `PC` commit |
 | Plan | `PA` approve the plan, `PF` send plan feedback |
 | Help | `P?` cheat sheet |
 
 Panel: `<CR>` opens the entry, `s` `S` stage, `m` sends, `b` base, `x` reject,
 `?` cheat sheet. Thread float (`Pt`): `r` replies, `y` `d` accept / decline,
-`-` `+` `=` simpler / deeper, `X` deletes, `q` closes. Plan: `A` approves, `F`
+`u` takes the decision back, `-` `+` `=` simpler / deeper, `X` deletes, `q`
+closes. Input window: `<CR>` sends, `<C-j>` new line, `<Esc>` (Normal mode) or
+`q` cancels. Plan: `A` approves, `F`
 sends feedback. Commit dialog: `<CR>` or `:w` commits, `<C-r>` takes a message
 the agent proposed while you typed, `q` cancels.
 
@@ -198,12 +212,14 @@ and the sentence below; `>` marks the entry on screen, `✓` the entries you saw
 | `·` and `→ commit` | change of another commit: leave it |
 | `?` and `not in any commit` / `stale range` | a change the map did not assign / an edit cut into the range |
 | number, `KEEP` `SIMPLIFY` `REMOVE` `DONE` `MOVED` | a finding and its verdict; its `detail` follows, dimmed |
-| `ran` `read` `opinion`, `✓ accepted` `✗ rejected` | how the agent knows; your decision on a finding |
+| `ran` `read` `opinion`, `✓ accepted` `✗ rejected` | how the agent knows; your decision on a finding (`, not sent` until `Pm`) |
 | `» t1 (waiting) you: …` and `↳ …` | your thread and the agent's last message |
 
 A thread's label after its id says where it stands: `(not sent)` (a change
 request waiting for `Pm`), `(waiting)`, `(proposal)` (accept or decline it),
-`(accepted)`, `(declined)`, `(done)`. An answered thread has no label. `(code
+`(accepted, not sent)` and `(declined, not sent)` (marked, `Pm` sends it),
+`(accepted)` and `(declined)` (sent), `(done)`. An answered thread has no
+label. `(code
 changed)` means the lines were rewritten after the thread was written; a thread
 longer than 6 lines ends with `… full thread: <key>`.
 

@@ -591,7 +591,7 @@ local function apply(t, info, view)
         local row = (view.by_new[si] or {})[note.line]
         if row then
           ui.annotate_at(buf, row, pad_of(buf, view, row), note.text, note.n, note.verdict, note.stale,
-            { decision = note.decision, evidence = note.evidence, detail = note.detail })
+            { decision = note.decision, decision_sent = note.decision_sent, evidence = note.evidence, detail = note.detail })
         end
       end
       for _, th in ipairs(step.threads or {}) do

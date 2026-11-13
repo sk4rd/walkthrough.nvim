@@ -210,6 +210,16 @@ local function migrate(data)
             end
             s.threads, s.comments = s.threads or threads, nil
           end
+          -- Before decisions were collected, a thread whose decision the
+          -- agent was not told was accepted or declined already; it is a
+          -- decision that is marked and not sent now.
+          for _, th in ipairs(type(s.threads) == 'table' and s.threads or {}) do
+            if type(th) == 'table' and (th.state == 'accepted' or th.state == 'declined')
+              and th.decision == nil and th.decision_sent ~= true then
+              th.decision = th.state == 'accepted' and 'accept' or 'reject'
+              th.state = 'proposed'
+            end
+          end
         end
       end
     end

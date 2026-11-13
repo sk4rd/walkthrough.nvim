@@ -383,12 +383,14 @@ local function annotate_at(buf, row, pad, text, n, verdict, stale, extra)
     table.insert(badges, { ' ' })
     table.insert(badges, { ' ' .. verdict:upper() .. ' ', verdict_hl[verdict] })
   end
+  -- A decision the agent was not told yet says so: `send` delivers it.
+  local hint = extra.decision and not extra.decision_sent and ', not sent' or ''
   if extra.decision == 'accept' then
     table.insert(badges, { ' ' })
-    table.insert(badges, { ' ✓ accepted ', 'WalkthroughAccepted' })
+    table.insert(badges, { ' ✓ accepted' .. hint .. ' ', 'WalkthroughAccepted' })
   elseif extra.decision == 'reject' then
     table.insert(badges, { ' ' })
-    table.insert(badges, { ' ✗ rejected ', 'WalkthroughRejected' })
+    table.insert(badges, { ' ✗ rejected' .. hint .. ' ', 'WalkthroughRejected' })
   end
   if extra.evidence then
     table.insert(badges, { ' ' .. extra.evidence, 'WalkthroughEvidence' })
@@ -409,7 +411,8 @@ M.annotate_at = annotate_at
 
 -- Show note number `n` on `line`: a badge at the end of the line, and the
 -- text as virtual lines underneath, indented to match the code. `extra` may
--- hold `decision` ('accept' or 'reject', the user's stance), `evidence`
+-- hold `decision` ('accept' or 'reject', the user's stance) and
+-- `decision_sent` (the agent was told), `evidence`
 -- ('ran', 'read' or 'opinion'), shown after the verdict, and `detail`, the
 -- longer explanation, wrapped under the text.
 function M.annotate(line, text, n, verdict, stale, extra)
@@ -431,6 +434,17 @@ local state_label = {
   draft = 'not sent', waiting = 'waiting', proposed = 'proposal', accepted = 'accepted', declined = 'declined',
   done = 'done',
 }
+
+--- The label of thread `th` (nil when it needs none): its state, or, for a
+--- decision the user marked and the agent was not told, the decision and
+--- `not sent`.
+function M.thread_label(th)
+  local decision, sent = tour.thread_decision(th)
+  if decision and not sent then
+    return (decision == 'accept' and 'accepted' or 'declined') .. ', not sent'
+  end
+  return state_label[th.state]
+end
 
 -- A thread is cut after this many virtual lines; the thread float shows the rest.
 local max_thread_lines = 6
@@ -456,7 +470,7 @@ local function draw_thread(buf, th, ns_id, at)
   local indent = #pad
   local dim = th.state == 'done' or th.state == 'declined'
   local hl = dim and 'WalkthroughThreadDim' or 'WalkthroughThread'
-  local label = state_label[th.state]
+  local label = M.thread_label(th)
   local state = label and ('(' .. label .. ')') or nil
   local head = ('» %s%s you: '):format(th.id, state and (' ' .. state) or '')
   local width = text_width(buf) - indent - 1
@@ -525,7 +539,7 @@ function M.draw(step)
     end
     for _, note in ipairs(step.notes or {}) do
       M.annotate(note.line, note.text, note.n, note.verdict, note.stale,
-        { decision = note.decision, evidence = note.evidence, detail = note.detail })
+        { decision = note.decision, decision_sent = note.decision_sent, evidence = note.evidence, detail = note.detail })
     end
     for _, th in ipairs(step.threads or {}) do
       draw_thread(buf, th)

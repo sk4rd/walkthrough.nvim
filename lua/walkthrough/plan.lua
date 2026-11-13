@@ -25,6 +25,7 @@ local tour = require('walkthrough.tour')
 local tours = require('walkthrough.tours')
 local store = require('walkthrough.store')
 local ui = require('walkthrough.ui')
+local input = require('walkthrough.input')
 
 local M = {}
 
@@ -481,7 +482,7 @@ function M.feedback(id)
     if t.plan_result then
       return notify('the feedback is on its way to the agent already')
     end
-    vim.ui.input({ prompt = 'What should change? ' }, ui.safe(function(text)
+    input.ask({ title = 'Plan feedback', prompt = 'What should change? ' }, function(text)
       text = vim.trim(text or '')
       if text == '' then
         return notify('no feedback sent')
@@ -497,7 +498,7 @@ function M.feedback(id)
         'Revise the plan for this feedback before presenting it again.',
       }, '\n'), {})
       notify('feedback sent; waiting for the revised plan')
-    end))
+    end)
     return
   end
   local marks = {}

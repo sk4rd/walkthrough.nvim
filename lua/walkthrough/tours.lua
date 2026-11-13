@@ -269,13 +269,23 @@ function M.seen_count(t)
 end
 
 --- How many threads of `list` (tours) are in each state: { draft, waiting,
---- answered, proposed, ... }, only the states that occur.
+--- answered, proposed, ... }, only the states that occur. What the user
+--- marked and the agent was not told counts as `draft` ("not sent"): a thread
+--- with a decision marked, and a finding with a decision marked.
 function M.thread_counts(list)
   local counts = {}
+  local function add(state)
+    counts[state] = (counts[state] or 0) + 1
+  end
   for _, t in ipairs(list) do
     for _, s in ipairs(t.steps) do
       for _, th in ipairs(s.threads or {}) do
-        counts[th.state] = (counts[th.state] or 0) + 1
+        add(tour.unsent_decision(th) and 'draft' or th.state)
+      end
+      for _, note in ipairs(s.notes or {}) do
+        if note.decision and not note.decision_sent then
+          add('draft')
+        end
       end
     end
   end
@@ -315,25 +325,58 @@ local function carry_threads(old, t)
   t.next_thread = math.max(t.next_thread or 1, old.next_thread or 1)
 end
 
---- Make `t` the active tour: it replaces the loaded tour of the same group
---- or is added after the others. What the user did survives the resend: steps
---- with the same file and title keep their `seen` flag and their threads;
---- the tour keeps its depth, its view (compact or file), the commit message
---- proposed for it and its thread counter.
+--- Whether the user has a commit of the agent in front of them for `root`: a
+--- tour that is not the local review (`auto`), `Other files` or a plan
+--- review, and that was shown in this session. Tours that came back from the
+--- state file silently (store.restore_for) and were never shown are not open
+--- yet: a new commit of the agent takes over from them, as it always did.
+function M.has_agent_commit(root)
+  for _, t in ipairs(st.tours) do
+    if t.root == root and not t.auto and not t.extra and not t.plan and t.shown then
+      return true
+    end
+  end
+  return false
+end
+
+--- Put `t` among the loaded tours: it replaces the loaded tour of the same
+--- group or is added after the others. What the user did survives the resend:
+--- steps with the same file and title keep their `seen` flag and their
+--- threads; the tour keeps its depth, its view (compact or file), the commit
+--- message proposed for it and its thread counter.
 ---
 --- A tour with a group also replaces the local review of its repository (the
 --- tour flagged `auto`), which hands its threads over by file. So does a
 --- tour without a group that takes the place of a review.
+---
+--- `t` becomes the active tour, except a commit with a group that arrives
+--- while the user is already in a map (a commit of the agent was shown, see
+--- has_agent_commit): the first commit of a map is the
+--- current one, so a later commit is added without switching, and a commit
+--- that replaces one that is loaded keeps the user where they are (the
+--- replaced tour stays the active tour when it was, and is not made active
+--- when it was not). Returns the index of `t` and whether it is the active
+--- tour now.
 function M.put(t)
+  local prev = M.active()
+  local _, old = M.find(t.group)
+  local activate = true
+  if t.group ~= nil and prev then
+    -- Nothing of this repository in front of the user: the commit is shown.
+    activate = not M.has_agent_commit(t.root) or old == prev
+  end
   if t.group ~= nil then
     local i, auto = M.find_auto(t.root)
     if auto then
       carry_threads(auto, t)
       t.view = t.view or auto.view
       table.remove(st.tours, i)
+      -- The review on screen is gone: the commit takes its place.
+      activate = activate or auto == prev
     end
   end
-  local idx, old = M.find(t.group)
+  local idx
+  idx, old = M.find(t.group)
   if old then
     if old.auto then
       carry_threads(old, t)
@@ -364,8 +407,18 @@ function M.put(t)
     table.insert(st.tours, t)
     idx = #st.tours
   end
-  st.active = idx
-  return idx
+  if activate then
+    st.active = idx
+  else
+    -- Indexes may have moved: find the tour that was on screen again.
+    st.active = 0
+    for i, x in ipairs(st.tours) do
+      if x == prev then
+        st.active = i
+      end
+    end
+  end
+  return idx, st.active == idx
 end
 
 --- Add tours read from the state file. Tours of the same repository that are

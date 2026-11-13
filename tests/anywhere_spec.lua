@@ -74,6 +74,9 @@ end
 -- A tour A of a and b, shown on a.
 local function load_a()
   assert(send('load', { group = 'A', steps = { { file = a, title = 'one' }, { file = b, title = 'two' } } }) == 'ok')
+  -- The first commit of a map stays current: when another commit was loaded
+  -- before, A is shown by choice.
+  w.group('A')
   vim.cmd('edit! ' .. vim.fn.fnameescape(a))
 end
 local function at(line)
@@ -379,7 +382,9 @@ send('patch', { thread = 't1', answer = 'rename x to y', proposal = true })
 check('patch: a proposal in Other files', th('t1').state == 'proposed')
 sent = {}
 w.decide('accept')
-check('decide: accepts a proposal in a plain buffer, sent at once', th('t1').state == 'accepted' and #sent == 1
+check('decide: marks a proposal in a plain buffer, nothing is sent', th('t1').state == 'proposed' and th('t1').decision == 'accept' and #sent == 0)
+w.send()
+check('decide: send delivers it, and the message names Other files', th('t1').state == 'accepted' and #sent == 1
   and sent[1].text:match('Decision on your proposal in thread t1') and sent[1].text:match('Other files'), sent[1] and sent[1].text)
 sent = {}
 w.explain('simpler')
