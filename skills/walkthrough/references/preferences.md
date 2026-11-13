@@ -1,31 +1,27 @@
-# Teaching preferences
+# Preferences
 
 These are the author's own preferences. `SKILL.md` tells the agent to read
-this file. Replace it with yours: the review method in `SKILL.md` and the
-protocol in `format.md` do not depend on it.
+this file. Replace it with yours: the method in `SKILL.md` and the protocol in
+`format.md` do not depend on it.
 
 ## The learner
 
 Check the agent's memory for the learner's level before explaining. Explain
 what they are weak in, and skip what they know.
 
-## Panel text
+## Answer style
 
-Per step, at most about 12 lines:
+An answer under a line is short:
 
-    # <step title>
-    One or two sentences: what this code does and why it changed.
-    ## Concepts
-    - **`import`** (essential): evaluates a file, returns its value. [link]
-    ## In use
-    `path:line` + short snippet
+- One to three sentences.
+- Name the concept by its real, searchable name.
+- When a concept is new, give one official link.
+- Give one example from this code.
 
-- Name concepts by their real, searchable name. Essential ones get a
-  sentence and a link. Look-up-later ones get one line.
-- At most 2 "in use" examples, from this repository where possible.
-- Show concepts in use, not trivial output. Include command output only when
-  it reveals something the source does not.
-- No analogies unless the learner asks for one.
+Show concepts in use, not trivial output. Include command output only when it
+reveals something the source does not. No analogies unless the learner asks
+for one. A longer explanation belongs in a finding's `detail`, or in an answer
+after the learner asked for it ("deeper").
 
 ## Links
 
@@ -40,9 +36,9 @@ search page, or give the `:help` tag.
 - Neovim: `:help <tag>`
 - Lua: the Lua reference manual
 
-## The map file
+## The notes file
 
-Save the map (groups, files, ranges, and a status for each group: not
+Save the map (commits, files, ranges, and a status for each commit: not
 started, in progress, understood, committed) to
 `~/.claude/learning/<project>/review-<scope>.md`, outside the repository.
 Keep it updated. It survives context compaction.
@@ -55,6 +51,6 @@ Keep it updated. It survives context compaction.
 
 ## Wrap-up
 
-When all groups are done, ask the learner to summarise the architecture and
+When all commits are done, ask the learner to summarise the architecture and
 say how they would debug the most likely failure. Fill the gaps. List the
 open decisions.

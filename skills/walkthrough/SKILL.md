@@ -1,144 +1,138 @@
 ---
 name: walkthrough
-description: Walk the user through code changes that already exist (uncommitted diff, a commit range, or a branch) so they understand and can review them, one feature at a time, as tours in Neovim or in chat. Use when the user invokes /walkthrough or says they need help reviewing or understanding existing or agent-written changes.
+description: Work with a user who reviews code in Neovim (walkthrough.nvim). Answer the questions and change requests they write on lines, propose before editing, build the map of a change (ordered commits that stand on their own), and write commit messages. Use when a message starts with "Walkthrough:", when the user says they sent something from Neovim, or when they ask to review, split or understand a change.
 ---
 
-Help a person understand code they did not write by hand, so they can
-explain, defend or remove each change and turn it into clean commits.
-Scope: $ARGUMENTS (default: the uncommitted diff).
+You work next to the user's Neovim. You do not lead a tour: you **answer what
+the user writes** and you **propose before you edit**.
 
-Read `references/preferences.md` now: it holds the author's teaching style
-(learner level, panel template, link sources). Users replace that file with
-their own. The protocol (fields, patches, output of `--status` and
-`--inbox`) is in `references/format.md`. Commands below are in this
-directory: `tour.sh`, `commit-check.sh`.
+Read `references/preferences.md` (the user's own style: level, link sources,
+how short to be) and `references/format.md` (the full protocol: fields,
+patches, `--status`, `--inbox`). The commands are in this directory: `tour.sh`
+and `commit-check.sh`.
 
-## 0. Mode
+Words: the **map** is the ordered list of commits of a change; a **commit**
+is a set of lines that builds on its own; its **entries** are its files; a
+**thread** is something the user wrote on lines, with the replies under it (a
+**question** or a **change request**); a **finding** is your note with a
+verdict. In JSON a commit has `group` and `steps`, and a finding is a `note`.
 
-Run `tour.sh --status` first. If it prints JSON, use visual mode: show every
-group as a tour in Neovim, without asking. If it prints an error (no running
-Neovim, several Neovims), use chat mode, or ask which Neovim and set
-`WALKTHROUGH_NVIM=<socket>`. Never guess from `$NVIM`; run the command. (A
-Claude Code hook, `hooks/visual-mode.sh`, can add the result to every prompt.
-It is optional.)
+## 1. Mode
 
-## 1. Map (no edits)
+Run `tour.sh --status` first. JSON means Neovim is reachable: answer there.
+An error means chat mode (no Neovim, or several): answer in chat, or ask which
+Neovim and set `WALKTHROUGH_NVIM=<socket>`. Never guess from `$NVIM`; run the
+command. (Claude Code only: the optional hook `hooks/visual-mode.sh` adds this
+result to every prompt.)
 
-- Read `git status`, `git diff HEAD --stat` and `git diff HEAD -U0` (staged,
-  unstaged, untracked files).
-- Group the changes by intent, not by file. One group is one commit that
-  builds on its own. Order the groups so dependencies come first.
-- List every changed range of every file in `hunks`, with its group. Split a
-  hunk that serves two groups by line. Anything that fits no group becomes its
-  own group or is flagged. Never drop it.
-- Summarise generated and lock files (`flake.lock`, `package-lock.json`, ...)
-  in one step instead of touring them.
-- Detect moved code with `git diff -M --color-moved`. Give moved blocks a
-  note with `"verdict": "moved"` so the user does not review them as new.
-- Staging means "approved for this commit". If the index already holds
-  staged changes, offer `git reset` (index only) and, for new files,
-  `git add -N <file>`. Ask first.
-- Present the groups: one line and a size each. Recommend an order (smallest
-  self-contained first unless the user names one). Let the user choose.
+## 2. A message from the user
 
-## 2. One group at a time
+A message that starts with `Walkthrough:` comes from the user's keys. Do what
+its `Expected:` lines say. If the user only says they sent something, read
+`tour.sh --inbox` (add `--all` for threads still waiting). Each item has a kind:
 
-Send the group as ONE tour, in one call. It opens at `start` (default: the
-first step):
+| Kind | Do | Reply (`tour.sh --patch -`) |
+|---|---|---|
+| `question` | answer at the user's level, short. Never change code for a question | `{ "thread": "t1", "answer": "..." }` |
+| `change` (change request) | reply with a **proposal** and wait. Edit nothing | `{ "thread": "t1", "answer": "<what you would change>", "proposal": true }` |
+| `decision` accepted | apply the proposal (or the `simplify` / `remove` finding), then report | `{ "thread": "t1", "answer": "<what you changed>", "done": true }`; for a finding `{ "step": 2, "note": 1, "verdict": "done" }` |
+| `decision` rejected | leave the code as it is | none |
+| simpler / deeper | rewrite your last answer at that level; keep to it afterwards (`depth` in `--status`) | `{ "thread": "t1", "answer": "<new text>", "replace": true }`; for a finding patch its `detail` |
+| `map` | build the map (next section) | `tour.sh` calls |
+| `commit` | write the commit message | `{ "commit_message": "feat(net): ...", "group": "<commit>" }` |
+
+Commit message rules, word for word: "Conventional Commits. One line. Add
+further lines only when the change is really complex. Never add a
+Co-authored-by line."
+
+A list of patches is applied as a whole: answer several threads in one call.
+
+## 3. Building the map
+
+1. Read `git status`, `git diff <base> --stat` and `git diff <base> -U0`
+   (`<base>` is in the request; `HEAD` by default). Include untracked files.
+2. Sort the change into commits that each stand on their own, ordered so
+   that nothing depends on a later commit. Several commits may touch the same
+   file. Group by intent, not by file. Anything that fits no commit becomes its
+   own commit; never drop it.
+3. Send one `tour.sh` call per commit, in order. `group` is the commit's
+   subject. The entries are its files in reading order, each with a
+   one-sentence `title` and `hunks` that assign **every** changed line of
+   that file to a commit: its own lines, and the lines of other commits with
+   their `group`. If `<base>` is not `HEAD`, give each entry `"diff": "<base>"`.
+4. A generated or lock file (`flake.lock`, `package-lock.json`) gets one entry
+   and one sentence.
+5. Add findings as `notes` with a `verdict` (`keep`, `simplify`, `remove`,
+   `moved`) and `evidence` (`ran`, `read`, `opinion`). Never label a guess
+   `ran`. Where you can, get the verdicts from a second look with fresh
+   context (a subagent or a separate pass that did not write the code): the
+   context that wrote the code tends to defend it. Find moved code with
+   `git diff -M --color-moved` and give it `"verdict": "moved"`.
+6. The limit: a deleted line cannot be assigned on its own. A deletion next to
+   another commit's change goes with that change. Say so in a note.
+
+## 4. After any edit
+
+Run `tour.sh --status` and patch what it lists under `stale`, and any `title`
+or note that describes code you changed. Positions otherwise follow edits by
+themselves. Use `tour.sh --patch -`; never resend the whole commit for this.
+
+## 5. What only the user does
+
+Staging, rejecting, committing and approving a plan. You never stage or
+commit; the user's commit command runs the check and makes the commit. Refer
+to commands (`:Walkthrough stage`), never to key names: users map their own.
+
+## 6. The commit check
+
+`commit-check.sh` runs on exactly the index (a copy in a temporary
+directory). It lists staged and unstaged files, then runs the project's
+check; if it fails, it runs it on HEAD to tell a new failure from an old one.
+The check is, first match wins: `$WALKTHROUGH_CHECK` (a command line), an
+executable `.walkthrough/check` in the index, or (a Nix example) a build of
+every `nixosConfigurations` host. With none it says "no check defined"; the user
+can add an executable `.walkthrough/check` that exits non-zero on failure.
+
+## 7. Plan review (Claude Code)
+
+With the optional hook `hooks/plan-review.sh`, leaving plan mode opens your plan
+in Neovim. If leaving plan mode is denied with a message that lists the user's
+annotations, answer each one with a thread patch, revise the plan, and present
+it again. The review continues in the same tab.
+
+## 8. Existing code
+
+Questions can arrive for files that are in no map (`Other files` in `group`).
+Answer them the same way with a thread patch. No map is needed.
+
+## 9. Rules
+
+- No edits unless a proposal was accepted or the user asked for one in chat.
+- A failed `tour.sh` call changed nothing: read the error, fix, resend.
+- Do not say the user understood or read something that `--status` does not
+  show (`seen`). Admit when you cannot tell why code is there.
+
+## Example
+
+One commit of the map:
 
     tour.sh - <<'EOF'
-    { "group": "Shared LAN constants",
+    { "group": "Share the LAN constants",
       "steps": [{
-        "file": "/absolute/path.nix", "title": "the constants",
-        "from": 10, "to": 20,
-        "hunks": [{ "from": 10, "to": 20, "group": "Shared LAN constants" },
-                  { "from": 41, "to": 41, "group": "Other feature" }],
-        "notes": [{ "line": 12, "text": "few words", "verdict": "simplify",
-                    "evidence": "read", "detail": "the explanation" }],
-        "panel": "markdown",
-        "check": { "question": "...", "answer": "..." }
-    }] }
+        "file": "/abs/net.nix", "title": "the constants move into one set",
+        "hunks": [{ "from": 10, "to": 20 },
+                  { "from": 41, "to": 41, "group": "Use the constants in the firewall" }],
+        "notes": [{ "line": 12, "text": "one use only", "verdict": "simplify",
+                    "evidence": "read", "detail": "Inline it: nothing else reads it." }]
+      }] }
     EOF
 
-- Steps stand alone: the user pages through them in any order, so each one
-  names its own context.
-- Keep panel text short. Name each concept by its real, searchable name and
-  link the official documentation the first time (see the preferences file).
-  Do not use analogies unless asked.
-- Walk the chunks in logical order, not file order: what, why, how it
-  connects. Say how to verify it works, and run what is safe to run.
-- Give each important step a `check`: one question on intent, data flow or a
-  failure mode. The user sees the question; the answer stays hidden until they
-  reveal it. Skip it for trivial steps. On a wrong answer, hint; do not reveal.
-- Never claim the user understands something that `--status` does not show:
-  `seen` (steps shown) and `check` (`open`, `revealed`, `answered`). Admit
-  when you cannot tell why something is there.
+The patch forms you use most (each is its own call, or an item of one list):
 
-## 3. Verdicts and evidence
-
-- Judge each chunk: `keep`, `simplify`, `remove` (or `moved`). Look for
-  unused options, duplicated logic, leftovers of the old approach,
-  unrequested behaviour, hardcoded values. Do not defend the code by default.
-- Where you can, get the verdicts from a second look with fresh context: a
-  subagent or a separate review pass that did not write the code. The context
-  that wrote the code tends to defend it.
-- Label every note with `evidence`: `ran` (you ran something that shows it),
-  `read` (you inferred it from the code) or `opinion`. Do not label a guess
-  `ran`.
-- Known limit: a deleted line counts as being on the line where it is
-  shown, so a deletion next to another group's change cannot be split from
-  it, and staging one group stages both. When that happens, say so in a note.
-
-## 4. After edits and from the user
-
-- After ANY edit to a toured file, run `tour.sh --status`. Positions follow
-  edits by themselves; patch only what it lists under `stale`, and any note
-  or panel text that describes code you changed. Use `tour.sh --patch -`,
-  never resend the tour. Mark applied suggestions `"verdict": "done"` and say
-  what changed in `detail`.
-- Read the user's side with `tour.sh --inbox`:
-  - a comment: answer it with a comment patch (`answer`); if you agree on an
-    issue or suggestion, change the code first and set `resolved`;
-  - an accepted `simplify` or `remove` decision: apply it, patch the note to
-    `done`;
-  - a rejected decision: leave the code as it is;
-  - the answer to a check: patch your `feedback` into the check.
-- Honour `depth` from `--status` (`simpler` or `deeper`) in later steps, and
-  when asked to explain simpler or deeper.
-- Edit code only when asked, one small change at a time.
-
-## 5. Approve and commit
-
-- Never stage, reject or commit for the user unless they ask. They approve a
-  group with `:Walkthrough stage`; they may reject it with `:Walkthrough
-  reject`.
-- When a group is staged, run `commit-check.sh`. It lists staged and
-  unstaged files and runs a check on exactly the index, saying whether a
-  failure is new or already broken at HEAD. Point out files from other
-  groups, or files of this group that are missing. Then propose a commit
-  message. The user commits, or you when asked.
-- The check is whatever the project defines, first match wins:
-  `$WALKTHROUGH_CHECK` (a command line), an executable `.walkthrough/check`
-  in the index, or (a Nix example) building every `nixosConfigurations` host.
-  If none exists, say "no check defined" and explain that the user can add an
-  executable `.walkthrough/check` that exits non-zero on failure.
-- Wait for the user before the next group.
-
-## 6. Incremental review (while you implement)
-
-- At the start of a task run `tour.sh --snapshot`. After each chunk the user
-  has reviewed, run it again to move the point forward.
-- Tour only what changed since: map `git diff refs/walkthrough/reviewed` and
-  give every step `"diff": "refs/walkthrough/reviewed"`. This works for files
-  that are new too.
-
-## Rules
-
-- No edits unless asked. "Skip the questions" means: just explain.
-- Output of `tour.sh` is `ok`, JSON or `error: ...`. Fix the JSON and resend:
-  a failed load or patch changed nothing.
-- A deleted file cannot be a step. Tour `git show HEAD:<path>` written to a
-  temporary file.
-- Refer to commands (`:Walkthrough stage`), not to key names: users map their
-  own.
-- When all groups are done, finish as `references/preferences.md` says.
+    tour.sh --patch - <<'EOF'
+    [ { "thread": "t1", "answer": "A set groups related values under one name. See ..." },
+      { "thread": "t2", "answer": "I would inline it in two places.", "proposal": true },
+      { "thread": "t2", "answer": "Done: inlined in net.nix and host.nix.", "done": true },
+      { "thread": "t3", "answer": "Shorter: ...", "replace": true },
+      { "commit_message": "refactor(net): share the LAN constants", "group": "Share the LAN constants" } ]
+    EOF

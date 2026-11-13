@@ -1,28 +1,32 @@
 #!/usr/bin/env bash
-# Send a walkthrough step or tour to a running Neovim, or patch it.
+# Talk to a running Neovim (walkthrough.nvim): send one commit of the map,
+# patch it, and read what the user wrote.
 #
-#   tour.sh step.json        send a step file
-#   tour.sh - <<'EOF'        send a step from stdin
-#   { "file": "...", ... }
+#   tour.sh commit.json      send one commit of the map from a file
+#   tour.sh - <<'EOF'        send one commit of the map from stdin
+#   { "group": "<the commit's subject>", "steps": [ { "file": "...", ... } ] }
 #   EOF
-#   tour.sh --patch - <<EOF  change parts of the tour in place, e.g.
-#   { "note": 3, "verdict": "done", "text": "..." }
+#   tour.sh --patch - <<EOF  change what is loaded in place, e.g. answer a thread
+#   { "thread": "t1", "answer": "..." }
 #   EOF
-#   tour.sh --status         print the current step as JSON
+#   tour.sh --status         print where the user is as JSON
 #   tour.sh --inbox [--all]  print what the user wrote since the last call
-#                            (comments, decisions, check answers) as JSON;
-#                            --all adds comments sent earlier that are open
+#                            (questions, change requests, decisions, requests
+#                            for a commit message or for the map) as JSON;
+#                            --all adds the threads that wait for an answer
 #   tour.sh --snapshot [name]
 #                            record the working tree as refs/walkthrough/<name>
-#                            (default: reviewed) and print the commit id; a
-#                            tour with "diff": "refs/walkthrough/<name>" then
-#                            shows only what changed after this point
-#   tour.sh --close          remove highlights and close the panel
+#                            (default: reviewed) and print the commit id; not
+#                            part of the workflow
+#   tour.sh --close          end the session: clear the marks, close the panel
+#   tour.sh --socket         print the socket that would be used (exit 1 and a
+#                            message on stderr when there is none); hooks
+#                            use it to find Neovim the same way
 #
-# A step file, --patch, --inbox and --snapshot print Neovim's answer ("ok",
-# JSON, a commit id or "error: ...") and exit non-zero on an error. --status
-# prints its answer and --close nothing; neither checks it. The files are
-# described in references/format.md, next to SKILL.md.
+# A file, --patch, --inbox and --snapshot print Neovim's answer ("ok", JSON, a
+# commit id or "error: ...") and exit non-zero on an error. --status prints its
+# answer and --close nothing; neither checks it. The fields are described in
+# references/format.md, next to SKILL.md.
 #
 # Socket: $WALKTHROUGH_NVIM, else $NVIM (set inside Neovim's terminal),
 # else the only Neovim socket in $XDG_RUNTIME_DIR.
@@ -50,6 +54,10 @@ find_socket() {
 
 sock=$(find_socket)
 
+if [[ ${1:-} == --socket ]]; then
+  echo "$sock"
+  exit 0
+fi
 if [[ ${1:-} == --close ]]; then
   nvim --server "$sock" --remote-expr "v:lua.require'walkthrough'.close()" >/dev/null
   exit 0
@@ -87,7 +95,7 @@ if [[ ${1:-} == --patch ]]; then
   shift
 fi
 
-step=${1:?usage: tour.sh [--patch] step.json | tour.sh [--patch] - | tour.sh --status | tour.sh --inbox [--all] | tour.sh --snapshot [name] | tour.sh --close}
+step=${1:?usage: tour.sh [--patch] commit.json | tour.sh [--patch] - | tour.sh --status | tour.sh --inbox [--all] | tour.sh --snapshot [name] | tour.sh --socket | tour.sh --close}
 if [[ $step == - ]]; then
   # BSD mktemp needs the X's at the end of the template (no --suffix).
   step=$(mktemp "${TMPDIR:-/tmp}/walkthrough.XXXXXX")

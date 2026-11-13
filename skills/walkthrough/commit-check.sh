@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Check that what is staged would make a good commit on its own.
+# Check that what is staged would make a good commit on its own. Neovim runs
+# it in the background for :Walkthrough commit (in the repository root); it can
+# be run by hand too.
 #
 #   commit-check.sh              staged/unstaged summary, then run the check
 #   commit-check.sh host ...     with the Nix check (3): build only these hosts

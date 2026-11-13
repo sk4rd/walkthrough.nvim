@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Optional, and specific to Claude Code (a UserPromptSubmit hook). The skill
-# works without it: SKILL.md tells the agent to run `tour.sh --status` itself.
+# Optional, and specific to Claude Code (a UserPromptSubmit hook, see
+# https://code.claude.com/docs/en/hooks). The skill works without it: SKILL.md
+# tells the agent to run `tour.sh --status` itself.
 #
-# Enforce the walkthrough's visual mode. On every prompt of a session that runs /walkthrough, check whether a Neovim
-# with the walkthrough module is reachable (tour.sh --status) and tell Claude
-# the result as a rule, so it never decides from guesses. Other sessions get
-# nothing. A session counts as a walkthrough when the prompt starts with
+# On every prompt of a session that uses the walkthrough skill, check whether
+# a Neovim with the walkthrough module is reachable (tour.sh --status) and tell
+# Claude the result as a rule, so it never decides from guesses. Other sessions
+# get nothing. A session counts as a walkthrough when the prompt starts with
 # /walkthrough or the transcript (a Claude Code file whose format is not
 # documented, so this may stop working) shows that the skill was invoked.
 set -u
@@ -42,7 +43,7 @@ while [[ -L $script ]]; do
 done
 tour="$(cd "$(dirname "$script")" && pwd -P)/../tour.sh"
 if status=$("$tour" --status 2>&1); then
-  msg="Walkthrough visual mode is ON (checked by hook: tour.sh --status -> $status). A Neovim with the walkthrough module is reachable. Show every group as a tour with tour.sh (one call per group) and update it with tour.sh --patch after edits. Do not present a group only in chat."
+  msg="Walkthrough visual mode is ON (checked by hook: tour.sh --status -> $status). A Neovim with the walkthrough module is reachable. Send the map with tour.sh, one call per commit; update it with tour.sh --patch. Do not present a commit only in chat."
 else
   msg="Walkthrough visual mode is OFF (checked by hook: tour.sh --status -> $status). Use chat mode, or ask the user to open Neovim or pick a socket."
 fi
