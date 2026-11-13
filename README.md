@@ -169,7 +169,7 @@ the prefix.
 | Group | Keys |
 |---|---|
 | Start | `Pr` review, `PM` request (ask the agent for the map), `PR` resume, `Pq` close |
-| Move | `]w` `[w` next / previous entry, `]n` `[n` next / previous thread or finding, `P]` `P[` next / previous commit, `Pv` switch compact / file view, `Pp` map panel, `Pw` back to the current entry |
+| Move | `]w` `[w` next / previous entry, `]n` `[n` next / previous thread or finding, `P]` `P[` next / previous commit, `Pv` switch compact / file view, `Pp` map panel, `Ph` hide / show the text under the lines, `Pw` back to the current entry |
 | Write | `Pa` ask (also on a selection), `Pc` change request (also on a selection), `Pm` send, `Pt` open the thread, `PX` delete the thread, `P-` simpler, `P+` `P=` deeper |
 | Decide | `Py` accept, `Pd` decline, `P0` clear (all three only mark; `Pm` sends) |
 | Approve | `Ps` stage, `PS` stage all, `Px` reject (discard the commit's unstaged lines), `Pb` base, `PC` commit |

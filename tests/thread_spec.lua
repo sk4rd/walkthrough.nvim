@@ -460,4 +460,68 @@ do
   w.close()
 end
 
+-- The text under the lines can be hidden: a marker stays at the end of the line.
+do
+  w.close()
+  local f = H.work .. '/f.txt'
+  check('inline: load', send('load', { steps = { { file = f, title = 't', notes = { { line = 5, text = 'a finding', verdict = 'keep' } } } } }) == 'ok')
+  vim.api.nvim_set_current_win(st.code_win)
+  vim.api.nvim_win_set_cursor(0, { 2, 0 })
+  w.change('make it shorter')
+  local buf = vim.api.nvim_get_current_buf()
+  local function drawn()
+    local vlines, eol = 0, {}
+    for _, name in ipairs({ 'walkthrough', 'walkthrough_threads' }) do
+      local id = vim.api.nvim_get_namespaces()[name]
+      for _, m in ipairs(id and vim.api.nvim_buf_get_extmarks(buf, id, 0, -1, { details = true }) or {}) do
+        -- The base lines of a diff are not notes: they say `- old text`.
+        for _, vl in ipairs(m[4].virt_lines or {}) do
+          if not H.vtext(vl):match('^%s*[-…]') then
+            vlines = vlines + 1
+          end
+        end
+        if m[4].virt_text then
+          table.insert(eol, { row = m[2] + 1, text = H.vtext(m[4].virt_text), chunks = m[4].virt_text })
+        end
+      end
+    end
+    return vlines, eol
+  end
+  local function eol_at(row, pattern)
+    local _, eol = drawn()
+    for _, e in ipairs(eol) do
+      if e.row == row and e.text:match(pattern) then
+        return e
+      end
+    end
+  end
+  local shown = drawn()
+  check('inline: shown by default, as text under the lines', shown >= 2 and not st.inline_hidden, shown)
+  w.inline()
+  local hidden = drawn()
+  check('inline: hidden: no text under the lines', hidden == 0 and st.inline_hidden == true, hidden)
+  local marker = eol_at(2, '» t%d+ %(not sent%)')
+  check('inline: hidden: the thread is a marker at the end of its line', marker ~= nil, vim.inspect({ drawn() }))
+  check('inline: hidden: the state keeps its colour', marker ~= nil and (function()
+    for _, chunk in ipairs(marker.chunks) do
+      if chunk[1]:match('not sent') then
+        return chunk[2] == 'WalkthroughState'
+      end
+    end
+  end)())
+  check('inline: hidden: the finding keeps its badges', eol_at(5, 'KEEP') ~= nil, vim.inspect({ drawn() }))
+  check('inline: hidden: nothing is deleted', #st.tours[1].steps[1].threads == 1 and #st.tours[1].steps[1].notes == 1)
+  w.thread()
+  check('inline: hidden: the thread float still shows the text', thread.win() ~= nil
+    and table.concat(vim.api.nvim_buf_get_lines(vim.api.nvim_win_get_buf(thread.win()), 0, -1, false), '\n'):match('make it shorter') ~= nil)
+  vim.api.nvim_win_close(thread.win(), true)
+  vim.api.nvim_set_current_win(st.code_win)
+  vim.api.nvim_win_set_cursor(0, { 7, 0 })
+  w.change('written while hidden')
+  check('inline: hidden: a new thread is a marker too', eol_at(7, '» t%d+') ~= nil and (drawn()) == 0, vim.inspect({ drawn() }))
+  vim.cmd('Walkthrough inline')
+  check('inline: the command shows the text again', (drawn()) >= 3 and not st.inline_hidden and eol_at(2, '» t%d+') == nil)
+  w.close()
+end
+
 H.finish()

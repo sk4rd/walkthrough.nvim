@@ -240,6 +240,12 @@ Move
                               "file"; without it the view is switched.
   `:Walkthrough map`          show the map panel, or hide it when it is open.
                               It changes nothing about the code window.
+  `:Walkthrough inline`       hide the text of threads and findings under the
+                              lines, or show it again. Hidden, a thread is a
+                              marker at the end of its line (`» t3 (waiting)`)
+                              and a finding keeps its badges. Nothing is
+                              deleted, and the thread float still shows the
+                              text. For this Neovim session only.
   `:Walkthrough back`         show the current entry again (use it after you
                               opened another file in the code window).
 
@@ -347,6 +353,7 @@ visual mode, where they cover the selected lines):
   <Plug>(walkthrough-group-prev)         previous commit
   <Plug>(walkthrough-view)               switch compact view and file view
   <Plug>(walkthrough-map)                show or hide the map panel
+  <Plug>(walkthrough-inline)             hide or show the text under the lines
   <Plug>(walkthrough-back)               back to the current entry
   <Plug>(walkthrough-ask)                ask a question here (sent at once)
   <Plug>(walkthrough-change)             write a change request here
@@ -394,6 +401,7 @@ Move
   P]  P[      next / previous commit
   Pv          switch between the compact view and the file view
   Pp          show or hide the map panel
+  Ph          hide or show the text under the lines
   Pw          back to the current entry
 Write
   Pa          ask a question (normal and visual mode)
@@ -1377,6 +1385,8 @@ notification (|vim.notify()|).
   note({delta})       jump to the next (1) or previous (-1) thread or finding
                       of the file in the current window
   map()               show the map panel, or hide it
+  inline()            hide the text of threads and findings under the lines,
+                      or show it
   ask({text}, {range})
                       ask a question, sent at once; {range} is `{ from, to }`.
                       Without {text} it is typed in the input window

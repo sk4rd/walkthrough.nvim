@@ -192,13 +192,13 @@ local function all_mapped(prefix)
 end
 local bad = all_mapped('<leader>w')
 check('keys = true: every default key is mapped to its action, with a desc', #bad == 0, table.concat(bad, ', '))
-check('keys = true: the table has the keys of the spec', #keys.defaults == 32)
+check('keys = true: the table has the keys of the spec', #keys.defaults == 33)
 -- The final key set, group by group, exactly as the product defines it ("P" is the prefix).
 do
   local spec = {
     Pr = 'review', PM = 'request', PR = 'resume', Pq = 'close',
     [']w'] = 'next', ['[w'] = 'prev', [']n'] = 'note-next', ['[n'] = 'note-prev', ['P]'] = 'group-next',
-    ['P['] = 'group-prev', Pv = 'view', Pp = 'map', Pw = 'back',
+    ['P['] = 'group-prev', Pv = 'view', Pp = 'map', Ph = 'inline', Pw = 'back',
     Pa = 'ask', Pc = 'change', Pm = 'send', Pt = 'thread', PX = 'thread-delete', ['P-'] = 'simpler',
     ['P+'] = 'deeper', ['P='] = 'deeper',
     Py = 'accept', Pd = 'decline', P0 = 'undecide',

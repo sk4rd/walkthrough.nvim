@@ -23,6 +23,7 @@ M.defaults = {
   { '[', 'group-prev' },
   { 'v', 'view' },
   { 'p', 'map' },
+  { 'h', 'inline' },
   { 'w', 'back' },
   -- Write
   { 'a', 'ask', { 'n', 'x' } },
@@ -103,6 +104,7 @@ local sheet = {
     { 'group-prev', 'previous commit', 'group prev' },
     { 'view', 'switch between the compact view and the file view', 'view' },
     { 'map', 'show or hide the map panel', 'map' },
+    { 'inline', 'hide or show the text under the lines', 'inline' },
     { 'back', 'back to the current entry', 'back' },
   } },
   { 'Write', {

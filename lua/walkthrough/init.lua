@@ -792,6 +792,8 @@ M.note = ui.safe(ui.note)
 --- Show the map panel, or hide it when it is open. Changes nothing about the
 --- code window or the shown step.
 M.map = ui.safe(ui.toggle_map)
+--- Hide or show the text of threads and findings under the lines.
+M.inline = ui.safe(ui.toggle_inline)
 -- `{ all = true }` stages the group in every file of the tour.
 M.stage_group = ui.safe(stage.stage_group)
 

@@ -66,6 +66,8 @@ local subcommands = {
   thread = function() wt().thread() end,
   -- map: show the map panel, or hide it.
   map = function() wt().map() end,
+  -- inline: hide the text of threads and findings under the lines, or show it.
+  inline = function() wt().inline() end,
   ['thread-delete'] = function() wt().thread_delete() end,
   stage = function(arg)
     if arg == 'all' then
@@ -187,6 +189,7 @@ local plugs = {
   change = plug(function() wt().change() end, { 'n', 'x' }),
   thread = plug(function() wt().thread() end),
   map = plug(function() wt().map() end),
+  inline = plug(function() wt().inline() end),
   ['thread-delete'] = plug(function() wt().thread_delete() end),
   send = plug(function() wt().send() end),
   accept = plug(function() wt().decide('accept') end),

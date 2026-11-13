@@ -402,7 +402,9 @@ local function annotate_at(buf, row, pad, text, n, verdict, stale, extra)
   end
 
   vim.api.nvim_buf_set_extmark(buf, ns, row - 1, 0, {
-    virt_lines = virt_lines,
+    -- Inline text hidden (M.toggle_inline): the badges stay, so the finding
+    -- is still found.
+    virt_lines = not st.inline_hidden and virt_lines or nil,
     virt_text = #badges > 0 and badges or nil,
     virt_text_pos = 'eol',
   })
@@ -472,6 +474,19 @@ local function draw_thread(buf, th, ns_id, at)
   local hl = dim and 'WalkthroughThreadDim' or 'WalkthroughThread'
   local label = M.thread_label(th)
   local state = label and ('(' .. label .. ')') or nil
+  -- Inline text hidden (M.toggle_inline): a marker at the end of the line
+  -- says that a thread is there and where it stands.
+  if st.inline_hidden then
+    local chunks = { { '  » ' .. th.id, hl } }
+    if state then
+      table.insert(chunks, { ' ' .. state, dim and hl or 'WalkthroughState' })
+    end
+    if th.stale then
+      table.insert(chunks, { ' (code changed)', hl })
+    end
+    vim.api.nvim_buf_set_extmark(buf, ns_id or ns, row - 1, 0, { virt_text = chunks, virt_text_pos = 'eol' })
+    return
+  end
   local head = ('» %s%s you: '):format(th.id, state and (' ' .. state) or '')
   local width = text_width(buf) - indent - 1
   local suffix = th.stale and ' (code changed)' or ''
@@ -598,6 +613,18 @@ end
 
 --- Draw the threads of the buffers the full draw does not cover (see
 --- drawer.lua). Never raises.
+--- Hide the text of threads and findings under the lines, or show it again.
+--- Hidden, a thread is a marker at the end of its line (`» t3 (waiting)`) and
+--- a finding keeps its badges; nothing is deleted, and the thread float shows
+--- the text. For this Neovim session only.
+function M.toggle_inline()
+  st.inline_hidden = not st.inline_hidden or nil
+  M.update()
+  vim.notify(st.inline_hidden
+    and 'walkthrough: text under the lines is hidden (markers stay at the end of the line)'
+    or 'walkthrough: text under the lines is shown')
+end
+
 function M.redraw_threads()
   pcall(function()
     require('walkthrough.drawer').redraw()
