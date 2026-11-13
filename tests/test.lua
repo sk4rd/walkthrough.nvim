@@ -1,43 +1,9 @@
--- Regression suite, run by tests/run.sh inside a throwaway git repository.
+-- Regression suite for the basics (load, overlay, notes, staging, layout);
+-- tests/run.sh runs it in a throwaway git repository.
 
-local work = vim.env.WORK
-local results, failed = {}, 0
-
-local function check(name, ok, info)
-  if not ok then
-    failed = failed + 1
-  end
-  table.insert(results, (ok and 'PASS ' or 'FAIL ') .. name .. (info and not ok and (' (' .. tostring(info) .. ')') or ''))
-end
-
-local function skip(name)
-  table.insert(results, 'SKIP ' .. name)
-end
-
-local function git(...)
-  return vim.trim(vim.fn.system({ 'git', '-C', work, ... }))
-end
-
-local w = require('walkthrough')
-local function send(fn, t)
-  local p = vim.fn.tempname()
-  vim.fn.writefile({ vim.json.encode(t) }, p)
-  return w[fn](p)
-end
-
-local ns = vim.api.nvim_get_namespaces().walkthrough
-local function marks(pred)
-  local n = 0
-  for _, m in ipairs(vim.api.nvim_buf_get_extmarks(0, ns, 0, -1, { details = true })) do
-    if pred(m[4]) then
-      n = n + 1
-    end
-  end
-  return n
-end
-local function sign(d, s)
-  return d.sign_text and vim.trim(d.sign_text) == s
-end
+local H = require('helpers')
+local work, check, skip, git, send, marks, sign = H.work, H.check, H.skip, H.git, H.send, H.marks, H.sign
+local w = H.w
 
 local hunks = { { from = 2, to = 3, group = 'A' }, { from = 4, to = 4, group = 'B' }, { from = 9, to = 9, group = 'A' } }
 local tour = {
@@ -203,6 +169,4 @@ check('panel minimum after a resize', wd.panel >= 30, vim.inspect(wd))
 check('setup rejects bad ratio', not pcall(w.setup, { code_min_ratio = 1.5 }))
 w.close()
 
-print(table.concat(results, '\n'))
-print(('%d failed'):format(failed))
-vim.cmd(failed > 0 and ('cquit ' .. failed) or 'qall!')
+H.finish()
