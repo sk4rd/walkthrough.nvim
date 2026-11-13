@@ -514,9 +514,14 @@ vim.api.nvim_create_autocmd({ 'BufWritePost', 'FileChangedShellPost' }, {
   end,
 })
 -- Typing or saving flips the buffer's modified flag: show or clear the
--- "unsaved changes" notice in the panel's winbar. (BufModifiedSet alone does
--- not fire for edits made by typing.)
-vim.api.nvim_create_autocmd({ 'BufModifiedSet', 'TextChanged', 'TextChangedI', 'TextChangedP' }, {
+-- "unsaved changes" notice in the panel's winbar. BufModifiedSet alone does
+-- not fire for edits made by typing, and newer Neovim versions no longer
+-- have that event, so it is only used where it exists.
+local modified_events = { 'TextChanged', 'TextChangedI', 'TextChangedP' }
+if vim.fn.exists('##BufModifiedSet') == 1 then
+  table.insert(modified_events, 'BufModifiedSet')
+end
+vim.api.nvim_create_autocmd(modified_events, {
   group = group,
   callback = function(ev)
     local step = current()

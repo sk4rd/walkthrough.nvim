@@ -12,7 +12,7 @@ jobs:
       matrix:
         neovim: [stable, nightly]
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v6.1.0
 
       - uses: rhysd/action-setup-vim@v1.6.1
         with:
