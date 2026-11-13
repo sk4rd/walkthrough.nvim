@@ -180,9 +180,9 @@ Panel: `<CR>` opens the entry, `s` `S` stage, `m` sends, `b` base, `x` reject,
 `?` cheat sheet. Thread float (`Pt`): `r` replies, `y` `d` accept / decline,
 `u` takes the decision back, `o` opens a link, `-` `+` `=` simpler / deeper,
 `X` deletes, `q` closes. Input window: `<CR>` sends, `<C-j>` new line, `<Esc>`
-(Normal mode) or `q` cancels. Plan: `A` approves, `F` sends feedback. Commit dialog: `<CR>` or `:w` commits, `<C-g>` asks the agent
-for a message, `<C-r>` takes a message the agent proposed while you typed, `q`
-cancels.
+(Normal mode) or `q` cancels. Plan: `A` approves, `F` sends feedback. Commit
+dialog: `cc`, `<CR>` or `:w` commits, `<C-g>` asks the agent for a message,
+`<C-r>` takes a message the agent proposed while you typed, `q` cancels.
 
 ## What you see
 

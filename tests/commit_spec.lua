@@ -175,7 +175,7 @@ local cfg = vim.api.nvim_win_get_config(d.win)
 check('the dialog is a centered float with an editable scratch buffer', cfg.relative == 'editor'
   and vim.bo[d.buf].modifiable and vim.bo[d.buf].buftype == 'acwrite' and vim.api.nvim_get_current_win() == d.win)
 local title = table.concat(vim.tbl_map(function(c) return c[1] end, cfg.title), '')
-check('the title names the keys', title:match('<CR>') and title:match('q') and title:match(':w') and title:match('<C%-g>'), title)
+check('the title names the keys', title:match('<CR>') and title:match('q') and title:match('cc') and title:match('<C%-g>'), title)
 check('the message area is empty at first, then the # lines', vim.api.nvim_buf_get_lines(d.buf, 0, 1, false)[1] == ''
   and vim.api.nvim_buf_get_lines(d.buf, 1, 2, false)[1]:sub(1, 1) == '#', text(d))
 check('the # lines name the group and the staged file', text(d):match('# Commit: A') and text(d):match('M  a%.txt'), text(d))
@@ -474,6 +474,13 @@ check('<CR>: the dialog window is gone', open_count() == 0)
 repo, d = commit_with({ 'chore: via write' })
 vim.cmd('write')
 check(':w commits', H.wait(function() return dialog() == nil end) and message_of(repo) == 'chore: via write', message_of(repo))
+
+-- cc commits too, as in fugitive and Neogit; it is a mapping of this buffer only.
+repo, d = commit_with({ 'chore: via cc' })
+check('cc is mapped in the dialog, in Normal mode only', vim.fn.maparg('cc', 'n') ~= '' and vim.fn.maparg('cc', 'i') == '')
+vim.api.nvim_feedkeys('cc', 'x', false)
+check('cc commits', H.wait(function() return dialog() == nil end) and message_of(repo) == 'chore: via cc', message_of(repo))
+check('cc: outside the dialog it is not mapped', vim.fn.maparg('cc', 'n') == '')
 
 -- empty message refused
 repo, d = commit_with(nil)

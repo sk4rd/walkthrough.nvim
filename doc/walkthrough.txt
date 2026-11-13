@@ -766,7 +766,7 @@ Approval has two steps. Step one is staging. Step two is `:Walkthrough commit`
     # check: running…
     # agent: not asked; <C-g> in normal mode asks for a message
     #
-    # Lines that start with # are not part of the message. <CR> commits, q cancels.
+    # Lines that start with # are not part of the message. cc or <CR> commits, q cancels.
 <
 
 The `#` lines name the commit, the staged files, the state of the check
@@ -795,7 +795,8 @@ lines are written again in place when the check finishes; what you typed and
 the cursor stay. A message that arrives before the dialog opens is stored on its
 commit (saved with it) and shown when the dialog opens. Keys in Normal mode:
 
-  <CR>      commit. `:w` does the same.
+  <CR>  cc  commit. `:w` does the same. (`cc` does not change a line here;
+            `S` does.)
   <C-g>     ask the agent for a message.
   q  <Esc>  cancel. Nothing changes: what is staged stays staged, and the
             stored message is kept for the next time. Closing the dialog in

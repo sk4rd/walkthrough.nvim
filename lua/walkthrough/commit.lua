@@ -187,7 +187,7 @@ local function comment_lines(d)
     add('commit FAILED: ' .. d.error, 'DiagnosticError')
   end
   add('')
-  add('Lines that start with # are not part of the message. <CR> commits, q cancels.')
+  add('Lines that start with # are not part of the message. cc or <CR> commits, q cancels.')
   return lines, hls
 end
 
@@ -560,7 +560,7 @@ local function open_window(d)
   d.win = vim.api.nvim_open_win(buf, true, {
     relative = 'editor', width = math.max(width, 20), height = 10, row = 0, col = 0,
     style = 'minimal', border = 'rounded',
-    title = ' <CR> or :w commit · <C-g> ask the agent · q cancel ', title_pos = 'center',
+    title = ' cc or <CR> commit · <C-g> ask the agent · q cancel ', title_pos = 'center',
   })
   vim.wo[d.win].wrap = true
   vim.wo[d.win].linebreak = true
@@ -571,6 +571,8 @@ local function open_window(d)
     vim.keymap.set('n', lhs, ui.safe(fn), { buffer = buf, nowait = true, desc = 'Walkthrough: ' .. desc })
   end
   map('<CR>', function() commit_now(d) end, 'commit')
+  -- `cc` as in fugitive and Neogit. It no longer changes a line here: `S` does.
+  map('cc', function() commit_now(d) end, 'commit')
   map('q', function() cancel(d) end, 'cancel the commit')
   map('<Esc>', function() cancel(d) end, 'cancel the commit')
   -- The message is the user's to write. The agent proposes one only on demand.
