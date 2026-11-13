@@ -110,8 +110,13 @@ vim.api.nvim_chan_send = function(chan, data)
   return real(chan, data)
 end
 ask()
-check('terminal: the bracketed paste, then a carriage return', #sent == 2 and sent[1]:sub(1, 6) == '\27[200~' and sent[1]:sub(-6) == '\27[201~'
-  and sent[2] == '\r', vim.inspect(sent))
+check('terminal: the bracketed paste goes first, alone', #sent == 1 and sent[1]:sub(1, 6) == '\27[200~' and sent[1]:sub(-6) == '\27[201~'
+  and not sent[1]:find('\r', 1, true), vim.inspect(sent))
+-- Enter in the same write as the text is read as part of the paste: it is a
+-- write of its own, after a pause.
+check('terminal: ... then a carriage return on its own', H.wait(function()
+  return #sent == 2
+end) and sent[2] == '\r', vim.inspect(sent))
 check('terminal: the bytes arrive', H.wait(function()
   local t = terminal_lines(buf)
   return t:match('Question t%d+ at f%.txt:2') and t:match('User: why trim%?')

@@ -999,8 +999,10 @@ The senders:
                 `prefill`, if there is one) without submitting it.
   "terminal"    pastes the text into the terminal buffer of a running agent as
                 one bracketed paste. With `submit` a carriage return follows
-                and you stay where you are; without it nothing is submitted
-                and you are moved to that window. The terminal is found by
+                after a short pause (in the same write the agent would read
+                it as pasted text) and you stay where you are; without it
+                nothing is submitted and you are moved to that window. The
+                terminal is found by
                 `terminal_pattern`. The text is plain, with the references as
                 `path:from-to` lines.
   "clipboard"   copies the plain text to the `+` register (to the unnamed

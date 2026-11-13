@@ -13,9 +13,33 @@ for _, name in ipairs({ 'ClaudeCodeAdd', 'ClaudeCodeFocus' }) do
   end, { nargs = '*', force = true })
 end
 local typed = {}
+-- Claude's terminal: a terminal buffer with a job (`cat`), and what is
+-- written to its channel.
+local agent_buf, agent_chan
+do
+  local win = vim.api.nvim_get_current_win()
+  vim.cmd('botright split')
+  vim.cmd('terminal cat')
+  agent_buf = vim.api.nvim_get_current_buf()
+  agent_chan = vim.bo[agent_buf].channel
+  vim.cmd('stopinsert')
+  vim.cmd('hide')
+  vim.api.nvim_set_current_win(win)
+end
+local keys = {}
+local real_chan_send = vim.api.nvim_chan_send
+vim.api.nvim_chan_send = function(chan, data)
+  if chan == agent_chan then
+    table.insert(keys, data)
+  end
+  return real_chan_send(chan, data)
+end
 package.loaded['claudecode.terminal'] = {
   send_to_terminal = function(text, opts)
     table.insert(typed, { text = text, submit = opts.submit })
+  end,
+  get_active_terminal_bufnr = function()
+    return agent_buf
   end,
 }
 
@@ -42,7 +66,12 @@ end)())
 vim.wait(1000, function()
   return #typed > 0
 end, 20)
-check('ask: one line is typed and submitted', #typed == 1 and typed[1].submit == true, vim.inspect(typed))
+-- Enter in the same write as the text is read as part of what was pasted and
+-- submits nothing: the line is typed without it, and Enter follows on its own.
+check('ask: one line is typed, without Enter', #typed == 1 and typed[1].submit == false and #keys == 0, vim.inspect({ typed, keys }))
+check('ask: ... then Enter is pressed on its own in the agent terminal', H.wait(function()
+  return #keys == 1
+end) and keys[1] == '\r', vim.inspect(keys))
 check('ask: ... it points at the context file', typed[1] and typed[1].text:match('^Walkthrough: act on the feedback in .*%-walkthrough%-note%.md')
   ~= nil and not typed[1].text:match('\n'), vim.inspect(typed))
 check('ask: ... and the thread is waiting', _G.walkthrough_state.history[1].threads[1].state == 'waiting')
@@ -59,7 +88,25 @@ vim.wait(1000, function()
 end, 20)
 check('submit = false: the line is typed but not submitted', #typed == 1 and typed[1].submit == false
   and typed[1].text:match('^Walkthrough: act on the feedback in'), vim.inspect(typed))
+vim.wait(500)
+check('submit = false: no Enter follows', #keys == 1, vim.inspect(keys))
 w.setup({ submit = true })
+
+-- A claudecode.nvim that does not say which terminal is Claude's: it types
+-- and submits by itself, as before.
+do
+  local term = package.loaded['claudecode.terminal']
+  local get = term.get_active_terminal_bufnr
+  term.get_active_terminal_bufnr = nil
+  calls, typed, keys = {}, {}, {}
+  require('walkthrough.send').send({ text = 'hello', refs = {} })
+  vim.wait(1000, function()
+    return #typed > 0
+  end, 20)
+  vim.wait(500)
+  check('no known terminal: claudecode types and submits', #typed == 1 and typed[1].submit == true and #keys == 0, vim.inspect({ typed, keys }))
+  term.get_active_terminal_bufnr = get
+end
 
 -- A prefill (a message from outside the thread flow) is what is typed, unsubmitted, when submit is off.
 calls, typed = {}, {}

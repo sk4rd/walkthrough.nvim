@@ -40,6 +40,17 @@ local senders = {}
 -- and the focus stays where it is; without it the agent terminal gets focus
 -- and the line (the prefill, if the message has one) is typed but not sent,
 -- so the user can edit it and press Enter.
+-- Enter is a key press of its own. In the same write as the text, or right
+-- behind it, the agent's prompt reads it as part of what was pasted: the text
+-- stays in the prompt and nothing is submitted. So it follows after a pause.
+local submit_delay = 300
+
+local function press_enter(chan)
+  vim.defer_fn(function()
+    pcall(vim.api.nvim_chan_send, chan, '\r')
+  end, submit_delay)
+end
+
 function senders.claudecode(msg)
   if vim.fn.exists(':ClaudeCodeAdd') ~= 2 then
     error('sender "claudecode" needs claudecode.nvim (the :ClaudeCodeAdd command is missing)', 0)
@@ -63,7 +74,17 @@ function senders.claudecode(msg)
   -- the terminal; a short delay keeps the text after the references.
   vim.defer_fn(function()
     local ok, err = pcall(function()
-      require('claudecode.terminal').send_to_terminal(line, { submit = msg.submit == true })
+      local term = require('claudecode.terminal')
+      local buf = msg.submit and term.get_active_terminal_bufnr and term.get_active_terminal_bufnr()
+      local chan = buf and vim.api.nvim_buf_is_valid(buf) and vim.bo[buf].channel or 0
+      if chan ~= 0 then
+        -- Typed without Enter; Enter is pressed on its own (see press_enter).
+        term.send_to_terminal(line, { submit = false })
+        press_enter(chan)
+      else
+        -- No terminal to press Enter in is known: claudecode does both.
+        term.send_to_terminal(line, { submit = msg.submit == true })
+      end
     end)
     if not ok then
       vim.notify('walkthrough: ' .. tour.clean_error(err), vim.log.levels.WARN)
@@ -113,6 +134,7 @@ end
 
 -- A terminal running an agent: the text is pasted as a bracketed paste, so
 -- the agent takes it as one block. With `submit` a carriage return follows
+-- after a pause (see press_enter)
 -- and the cursor stays where it is; without it nothing is submitted (no
 -- trailing newline, no Enter) and the cursor moves to the terminal.
 function senders.terminal(msg)
@@ -123,7 +145,7 @@ function senders.terminal(msg)
   local chan = vim.bo[buf].channel
   vim.api.nvim_chan_send(chan, '\27[200~' .. flatten(msg) .. '\27[201~')
   if msg.submit then
-    vim.api.nvim_chan_send(chan, '\r')
+    press_enter(chan)
   elseif win then
     vim.api.nvim_set_current_win(win)
     vim.cmd.startinsert()
