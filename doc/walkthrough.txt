@@ -781,8 +781,8 @@ Approval has two steps. Step one is staging. Step two is `:Walkthrough commit`
   1. It starts the project's check in the background, on exactly what is
      staged (|walkthrough-commit-check|). The editor is not blocked.
   2. It opens a centered float with an editable buffer laid out like git's own
-     message file: the message on top (empty at first, or the message stored
-     for the commit), then lines that start with `#` and are never part of
+     message file: the message on top (the message stored for the commit,
+     else the commit's `group` from the map, else empty), then lines that start with `#` and are never part of
      the message:
 
 >

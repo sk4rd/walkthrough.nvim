@@ -176,15 +176,16 @@ check('the dialog is a centered float with an editable scratch buffer', cfg.rela
   and vim.bo[d.buf].modifiable and vim.bo[d.buf].buftype == 'acwrite' and vim.api.nvim_get_current_win() == d.win)
 local title = table.concat(vim.tbl_map(function(c) return c[1] end, cfg.title), '')
 check('the title names the keys', title:match('cc commit') and title:match('q cancel') and title:match('<C%-g>') and not title:match('<CR>'), title)
-check('the message area is empty at first, then the # lines', vim.api.nvim_buf_get_lines(d.buf, 0, 1, false)[1] == ''
-  and vim.api.nvim_buf_get_lines(d.buf, 1, 2, false)[1]:sub(1, 1) == '#', text(d))
+check('the message is the commit\'s group from the map, then a blank line and the # lines',
+  vim.deep_equal(vim.api.nvim_buf_get_lines(d.buf, 0, 2, false), { 'A', '' })
+  and vim.api.nvim_buf_get_lines(d.buf, 2, 3, false)[1]:sub(1, 1) == '#', text(d))
 check('the # lines name the group and the staged file', text(d):match('# Commit: A') and text(d):match('M  a%.txt'), text(d))
 check('a staged file of the tour gets no warning', not text(d):match('not part of this commit'), text(d))
 check('the agent is not asked by opening the dialog', #requests() == 0 and text(d):match('# agent: not asked; <C%-g>') ~= nil
   and #vim.json.decode(w.inbox()).items == 0, text(d))
-check('status: the dialog, the check and no message', (function()
+check('status: the dialog, the check and the message from the group', (function()
   local s = status().commit
-  return s and s.group == 'A' and s.message == false and (s.check == 'running' or s.check == 'passed')
+  return s and s.group == 'A' and s.message == true and (s.check == 'running' or s.check == 'passed')
 end)(), w.status())
 press('q')
 check('q closes the dialog', dialog() == nil and open_count() == 0 and status().commit == nil)
@@ -295,7 +296,7 @@ gated_check(flag, 0)
 w.commit()
 d = dialog()
 check('check: running…', text(d):match('# check: running…') ~= nil and status().commit.check == 'running', text(d))
-vim.api.nvim_feedkeys(vim.keycode('ifeat: typed<CR>second line<Esc>'), 'x', false)
+vim.api.nvim_feedkeys(vim.keycode('Sfeat: typed<CR>second line<Esc>'), 'x', false)
 vim.api.nvim_win_set_cursor(d.win, { 1, 3 })
 local typed = vim.api.nvim_buf_get_lines(d.buf, 0, 2, false)
 release(flag)
@@ -362,7 +363,7 @@ vim.env.WALKTHROUGH_CHECK = 'true'
 w.commit()
 d = dialog()
 check('patch: accepted', send('patch', { commit_message = 'feat(a): change a' }) == 'ok')
-check('patch: fills the empty message area', vim.api.nvim_buf_get_lines(d.buf, 0, 1, false)[1] == 'feat(a): change a', text(d))
+check('patch: replaces the untouched group in the message area', vim.api.nvim_buf_get_lines(d.buf, 0, 1, false)[1] == 'feat(a): change a', text(d))
 check('patch: the agent is no longer awaited', text(d):match('# agent: message received') ~= nil and not text(d):match('waiting for'), text(d))
 check('status: a message', status().commit.message == true)
 check('the inbox does not list the answered request', #vim.tbl_filter(function(i) return i.kind == 'commit' end,
@@ -424,7 +425,7 @@ tour_of('A').commit_message = nil
 -- The message of B is not A's: the dialog of A is empty; a message that came before is shown
 w.commit()
 d = dialog()
-check('a message for another tour does not show in this dialog', vim.api.nvim_buf_get_lines(d.buf, 0, 1, false)[1] == '', text(d))
+check('a message for another tour does not show in this dialog: A\'s group does', vim.api.nvim_buf_get_lines(d.buf, 0, 1, false)[1] == 'A', text(d))
 press('q')
 send('patch', { commit_message = 'feat(a): before the dialog' })
 local asked_before = #requests()
@@ -512,7 +513,7 @@ check('cc commits, with the lines <CR> added', H.wait(function() return dialog()
 check('cc: outside the dialog it is not mapped', vim.fn.maparg('cc', 'n') == '')
 
 -- empty message refused
-repo, d = commit_with(nil)
+repo, d = commit_with({})
 reset_log()
 press('cc')
 check('an empty message is refused', find('commit message is empty') ~= nil and dialog() ~= nil and H.git_in(repo, 'rev-list', '--count', 'HEAD') == '1', vim.inspect(log))

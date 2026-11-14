@@ -2,9 +2,9 @@
 -- is step one; `commit` then
 --   - runs the project's check on exactly the index, in the background
 --     (skills/walkthrough/commit-check.sh),
---   - asks the agent for a commit message, and
 --   - shows both in an editable float, laid out like git's own message file:
---     the message on top, then lines that start with `#` and are never part
+--     the message on top (the agent's, else the commit's group from the map;
+--     <C-g> asks the agent for one), then lines that start with `#` and are never part
 --     of it (the group, the staged files, the state of the check, whether the
 --     agent's proposal is awaited, warnings).
 -- cc (or :w) makes the commit with `git commit -F -`, hooks enabled; q and
@@ -693,7 +693,10 @@ function M.commit()
 
   local d = {
     root = root, group = t.group, files = files, listed = listed, stat = vim.trim(stat.stdout or ''),
-    awaiting = false, inserted = t.commit_message or '',
+    -- The message: one the agent wrote for this commit, else the commit's
+    -- subject in the map (its group). The agent's answer to <C-g> still
+    -- replaces it while it is untouched.
+    awaiting = false, inserted = t.commit_message or t.group or '',
     -- A message kept from an earlier dialog of this commit came from the agent.
     received = (t.commit_message or '') ~= '',
   }
